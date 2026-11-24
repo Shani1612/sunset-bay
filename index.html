@@ -4235,10 +4235,76 @@ function updateEat(dt){
   }
 }
 
+// ---------- friends mode outside Claude (e.g. GitHub Pages): PeerJS, phone-to-phone ----------
+// The host's game is the server: everyone sends it their state, it sends everyone's state back 10 times a second.
+// It offers the same calls as a Claude room (presence / onPeers / onConnection / leave), so the rest of the code doesn't care.
+const PEER_LIBS=['https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js','https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js'];
+function loadPeerJS(){
+  if(window.Peer)return Promise.resolve();
+  return new Promise((res,rej)=>{
+    let i=0;const next=()=>{if(i>=PEER_LIBS.length){rej({code:'lib'});return;}
+      const sc=document.createElement('script');sc.src=PEER_LIBS[i++];sc.onload=()=>window.Peer?res():next();sc.onerror=()=>{sc.remove();next();};document.head.appendChild(sc);};
+    next();
+  });
+}
+function p2pRoom(code,host){
+  return new Promise((resolve,reject)=>{
+    const hostId='sunsetbay-'+code.toLowerCase();
+    const peer=host?new Peer(hostId,{debug:0}):new Peer({debug:0});
+    const R={myId:null,me:{},state:new Map(),conns:new Map(),hostConn:null,peersFns:[],connFns:[],errFns:[],connected:false,closed:false,done:false};
+    const fail=e=>{if(R.done)return;R.done=true;R.leave();reject(e);};
+    const ok=()=>{if(R.done)return;R.done=true;resolve(R);};
+    const emitPeers=()=>{
+      const list=[{peer:R.myId,sameTab:true,presence:R.me}];
+      for(const [k,v] of R.state)if(k!==R.myId&&v&&typeof v==='object')list.push({peer:k,sameTab:false,presence:v});
+      for(const f of R.peersFns)f({peers:list});
+    };
+    const setConn=c=>{if(R.connected===c)return;R.connected=c;for(const f of R.connFns)f(c);};
+    R.presence=o=>{R.me=o;if(host)R.dirty=true;else if(R.hostConn&&R.hostConn.open){try{R.hostConn.send({t:'p',p:o});}catch(e){}}return Promise.resolve();};
+    R.onPeers=(fn,err)=>{R.peersFns.push(fn);if(err)R.errFns.push(err);setTimeout(emitPeers,0);return()=>{};};
+    R.onConnection=fn=>{R.connFns.push(fn);setTimeout(()=>fn(R.connected),0);return()=>{};};
+    R.leave=()=>{R.closed=true;clearInterval(R.timer);try{peer.destroy();}catch(e){}return Promise.resolve();};
+    if(host){
+      R.timer=setInterval(()=>{
+        if(R.closed)return;
+        const all={};all[R.myId]=R.me;for(const [k,v] of R.state)all[k]=v;
+        const msg={t:'all',peers:all};
+        for(const c of R.conns.values())if(c.open){try{c.send(msg);}catch(e){}}
+        emitPeers();
+      },100);
+      peer.on('connection',c=>{
+        c.on('open',()=>{if(R.conns.size>=7){try{c.send({t:'full'});}catch(e){}setTimeout(()=>c.close(),400);return;}R.conns.set(c.peer,c);});
+        c.on('data',d=>{if(d&&d.t==='p'&&d.p&&typeof d.p==='object'&&R.conns.has(c.peer))R.state.set(c.peer,d.p);});
+        const drop=()=>{R.conns.delete(c.peer);R.state.delete(c.peer);emitPeers();};
+        c.on('close',drop);c.on('error',drop);
+      });
+    }
+    peer.on('open',id=>{
+      R.myId=id;
+      if(host){setConn(true);ok();return;}
+      const c=peer.connect(hostId,{serialization:'json'});R.hostConn=c;
+      const t=setTimeout(()=>fail({code:'timeout'}),15000);
+      c.on('open',()=>{clearTimeout(t);setConn(true);try{c.send({t:'p',p:R.me});}catch(e){}ok();});
+      c.on('data',d=>{
+        if(d&&d.t==='all'&&d.peers&&typeof d.peers==='object'){R.state=new Map(Object.entries(d.peers));R.state.delete(R.myId);emitPeers();}
+        else if(d&&d.t==='full'){clearTimeout(t);fail({code:'full'});}
+      });
+      c.on('close',()=>{if(R.closed)return;setConn(false);R.state.clear();emitPeers();for(const f of R.errFns)f({code:'host_left'});});
+    });
+    peer.on('error',e=>{
+      const ty=e&&e.type;
+      if(ty==='peer-unavailable')fail({code:'no_server'});
+      else if(ty==='unavailable-id')fail({code:'taken'});
+      else if(!R.done)fail({code:ty||'error'});
+    });
+    peer.on('disconnected',()=>{if(!R.closed){try{peer.reconnect();}catch(e){}}}); // only the matchmaking link dropped; games keep talking
+  });
+}
+
 // ---------- play with friends: one server code = one named room; everyone shares the same city ----------
 // Each player sends where they are (presence, ~10 times a second); everyone else draws them.
 // Traffic and people are each player's own; players, their cars and their hits are shared.
-const mp={api:null,room:null,code:null,name:'',myPeer:null,remotes:new Map(),seq:0,hits:[],sendT:0,last:'',connected:false,ready:false};
+const mp={kind:null,api:null,room:null,code:null,name:'',myPeer:null,remotes:new Map(),seq:0,hits:[],sendT:0,last:'',connected:false,ready:false};
 const HEX=/^#[0-9a-f]{6}$/i,CODE_CH='ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 function mpStatus(t,bad){const el=$('mpStatus');el.textContent=t;el.classList.toggle('bad',!!bad);}
 function mpSetButtons(on){$('mpHost').disabled=!on;$('mpJoin').disabled=!on;$('mpCode').disabled=!on;}
@@ -4254,24 +4320,33 @@ function mpCleanName(v){return String(v||'').replace(/[^\p{L}\p{N} _.-]/gu,'').t
   $('mpCode').addEventListener('keydown',e=>{e.stopPropagation();if(e.key==='Enter')$('mpJoin').click();});
   $('mpName').addEventListener('keydown',e=>e.stopPropagation());
   mpSetButtons(false);mpStatus('Checking multiplayer…');
-  const off=()=>{mpStatus('Friends mode works when the game is opened from its Claude link while signed in. You can still play solo.',true);};
-  if(!window.claude||typeof window.claude.use!=='function'){off();return;}
-  window.claude.use('room').then(api=>{mp.api=api;if(!api){off();return;}mp.ready=true;mpSetButtons(true);mpStatus('Host a server and send the code to your friends, or type their code to join.');}).catch(off);
+  const hello='Host a server and send the code to your friends, or type their code to join.';
+  // outside Claude (or when Claude's rooms aren't available) friends connect phone-to-phone with PeerJS
+  const p2p=()=>{if(mp.kind)return;mp.kind='p2p';mp.ready=true;mpSetButtons(true);mpStatus(hello);};
+  if(!window.claude||typeof window.claude.use!=='function'){p2p();return;}
+  window.claude.use('room').then(api=>{if(!api){p2p();return;}mp.api=api;mp.kind='room';mp.ready=true;mpSetButtons(true);mpStatus(hello);}).catch(p2p);
 })();
 async function mpJoinCode(code,host){
-  if(!mp.api||mp.room)return;
+  if(!mp.ready||mp.room)return;
   mp.name=mpCleanName($('mpName').value)||mp.name;try{localStorage.setItem('sb_name',mp.name);}catch(e){}
   mpSetButtons(false);mpStatus(host?'Opening server '+code+'…':'Joining server '+code+'…');
   try{
-    const r=await mp.api.join('sb-'+code.toLowerCase());
+    if(mp.kind==='p2p'){mpStatus((host?'Opening server ':'Joining server ')+code+'…');await loadPeerJS();}
+    const r=mp.kind==='room'?await mp.api.join('sb-'+code.toLowerCase()):await p2pRoom(code,host);
     mp.room=r;mp.code=code;
-    r.onPeers(ch=>mpPeers(ch.peers),e=>{mpStatus('Lost the server ('+(e&&e.code||'error')+')',true);});
+    r.onPeers(ch=>mpPeers(ch.peers),e=>{mp.ended=true;const t=e&&e.code==='host_left'?'The host left · the server is closed':'Lost the server';mpStatus(t,true);showMsg(t,4);});
     r.onConnection(c=>{mp.connected=c;});
     startGame();
     showMsg(host?'Server '+code+' is open · give your friends this code':'Joined server '+code,3.5);
   }catch(e){
+    const c=e&&e.code;
+    if(c==='taken'&&host){let n='';for(let i=0;i<6;i++)n+=CODE_CH[Math.floor(Math.random()*CODE_CH.length)];mpJoinCode(n,true);return;}
     mpSetButtons(true);
-    mpStatus(e&&e.code==='limit_reached'?'Too many servers open right now, try again in a moment':e&&e.code==='not_permitted'?'Friends mode isn\'t available for your account here':'Could not connect, try again',true);
+    if(c==='no_server'){mpStatus('No server with code '+code+'. Check the code, and that your friend is still in the game.',true);return;}
+    if(c==='full'){mpStatus('That server is full (8 players).',true);return;}
+    if(c==='lib'){mpStatus('Could not load the multiplayer library. Check your internet connection.',true);return;}
+    if(c==='timeout'){mpStatus("Could not reach your friend's game. Try again, or try another network (some mobile networks block direct connections).",true);return;}
+    mpStatus(c==='limit_reached'?'Too many servers open right now, try again in a moment':e&&e.code==='not_permitted'?'Friends mode isn\'t available for your account here':'Could not connect, try again',true);
   }
 }
 function mpPeers(list){
@@ -4382,7 +4457,7 @@ function mpUpdate(dt){
   }
   const n=mp.remotes.size+1;
   $('mpTag').hidden=false;
-  $('mpTag').textContent='Server '+mp.code+' · '+n+(n===1?' player':' players')+(mp.connected?'':' · reconnecting…');
+  $('mpTag').textContent='Server '+mp.code+' · '+n+(n===1?' player':' players')+(mp.ended?' · server closed':mp.connected?'':' · reconnecting…');
 }
 // bullets: friends are upright cylinders, their cars boxes
 function mpRay(o,d,best,minT){
