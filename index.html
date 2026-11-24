@@ -205,7 +205,8 @@ body.touch #pmTitle{font-size:26px}
 #mpCode{text-transform:uppercase;letter-spacing:.12em}
 .mprow{display:flex;gap:8px}
 #mpHost,#mpJoin{font-family:var(--display);font-size:17px;border:0;border-radius:6px;padding:7px 16px;cursor:pointer;background:var(--cop);color:var(--night)}
-#mpHost{flex:1}
+#mpHost,#mpJoin{flex:1}
+#mpCode::placeholder{text-transform:none;letter-spacing:0;font-size:13px}
 #mpHost:disabled,#mpJoin:disabled,#mpCode:disabled{opacity:.45;cursor:default}
 #mpStatus{font-size:13px;color:#cfe8ff;line-height:1.4;min-height:1.4em}
 #mpStatus.bad{color:#ffb3c0}
@@ -349,8 +350,8 @@ body.touch .say{font-size:11px;padding:2px 7px}
     <div class="modes"><button id="start" type="button">Play Solo</button><button id="mpBtn" type="button">Play with Friends</button></div>
     <div id="mpPanel" hidden>
       <label class="mpl">Your name <input id="mpName" maxlength="14" autocomplete="off" spellcheck="false"></label>
-      <div class="mprow"><button id="mpHost" type="button">Host a server</button></div>
-      <div class="mprow"><input id="mpCode" maxlength="8" placeholder="Server code" autocomplete="off" spellcheck="false" aria-label="Server code"><button id="mpJoin" type="button">Join</button></div>
+      <div class="mprow"><input id="mpCode" maxlength="8" placeholder="Server code · 4–8 letters or numbers" autocomplete="off" spellcheck="false" aria-label="Server code"></div>
+      <div class="mprow"><button id="mpHost" type="button">Host server</button><button id="mpJoin" type="button">Join server</button></div>
       <div id="mpStatus" role="status"></div>
     </div>
   </div>
@@ -4315,12 +4316,13 @@ function mpCleanName(v){return String(v||'').replace(/[^\p{L}\p{N} _.-]/gu,'').t
   $('mpName').value=mp.name;
   $('mpBtn').addEventListener('click',()=>{const pnl=$('mpPanel');pnl.hidden=!pnl.hidden;$('card').classList.toggle('mpopen',!pnl.hidden);if(!pnl.hidden){pnl.scrollIntoView({block:'nearest'});if(!isTouch)$('mpName').focus();}});
   $('mpName').addEventListener('change',()=>{mp.name=mpCleanName($('mpName').value)||mp.name;$('mpName').value=mp.name;try{localStorage.setItem('sb_name',mp.name);}catch(e){}});
-  $('mpHost').addEventListener('click',()=>{let c='';for(let i=0;i<6;i++)c+=CODE_CH[Math.floor(Math.random()*CODE_CH.length)];mpJoinCode(c,true);});
-  $('mpJoin').addEventListener('click',()=>{const c=$('mpCode').value.toUpperCase().replace(/[^A-Z0-9]/g,'');if(c.length<4){mpStatus('Type the server code your friend gave you',true);return;}mpJoinCode(c,false);});
+  const readCode=()=>{const c=$('mpCode').value.toUpperCase().replace(/[^A-Z0-9]/g,'');$('mpCode').value=c;return c;};
+  $('mpHost').addEventListener('click',()=>{const c=readCode();if(c.length<4){mpStatus('Pick a server code first: 4 to 8 letters or numbers (for example SHANI1)',true);$('mpCode').focus();return;}mpJoinCode(c,true);});
+  $('mpJoin').addEventListener('click',()=>{const c=readCode();if(c.length<4){mpStatus('Type the server code your friend gave you',true);$('mpCode').focus();return;}mpJoinCode(c,false);});
   $('mpCode').addEventListener('keydown',e=>{e.stopPropagation();if(e.key==='Enter')$('mpJoin').click();});
   $('mpName').addEventListener('keydown',e=>e.stopPropagation());
   mpSetButtons(false);mpStatus('Checking multiplayer…');
-  const hello='Host a server and send the code to your friends, or type their code to join.';
+  const hello='Type a server code. Host server opens it with that code; your friends type the same code and press Join server.';
   // outside Claude (or when Claude's rooms aren't available) friends connect phone-to-phone with PeerJS
   const p2p=()=>{if(mp.kind)return;mp.kind='p2p';mp.ready=true;mpSetButtons(true);mpStatus(hello);};
   if(!window.claude||typeof window.claude.use!=='function'){p2p();return;}
@@ -4340,8 +4342,8 @@ async function mpJoinCode(code,host){
     showMsg(host?'Server '+code+' is open · give your friends this code':'Joined server '+code,3.5);
   }catch(e){
     const c=e&&e.code;
-    if(c==='taken'&&host){let n='';for(let i=0;i<6;i++)n+=CODE_CH[Math.floor(Math.random()*CODE_CH.length)];mpJoinCode(n,true);return;}
     mpSetButtons(true);
+    if(c==='taken'){mpStatus('The code '+code+' is already in use by another server. Pick a different code.',true);return;}
     if(c==='no_server'){mpStatus('No server with code '+code+'. Check the code, and that your friend is still in the game.',true);return;}
     if(c==='full'){mpStatus('That server is full (8 players).',true);return;}
     if(c==='lib'){mpStatus('Could not load the multiplayer library. Check your internet connection.',true);return;}
