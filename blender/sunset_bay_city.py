@@ -1746,7 +1746,7 @@ def human_pose(h, female, walk, phase, phone, rnd):
         if not walk:
             th = math.radians(rnd.uniform(-3, 3)) + sgn * 0.0
         back = max(0.0, -th) / (A if A else 1.0)
-        bend = math.radians(5 + 30 * back)
+        bend = math.radians(5 + 13 * back)                  # trailing knee bends a little; heel lifts ~8 cm
         hip = Vector((0, sgn * hipw, 0.92 * k))
         knee = hip + Vector((math.sin(th), sgn * 0.01, -math.cos(th))) * (0.43 * k)
         ank = knee + Vector((math.sin(th - bend), 0, -math.cos(th - bend))) * (0.42 * k)
@@ -1770,10 +1770,11 @@ def human_pose(h, female, walk, phase, phone, rnd):
 
 def shoe(name, root, ank, mat, sole_mat, k):
     """A shoe from heel to toe, pitched so the toe stays on the ground when the heel lifts."""
-    heel = Vector((ank.x - 0.06 * k, ank.y, max(0.012, ank.z - 0.075 * k)))
-    toe = Vector((ank.x + 0.17 * k, ank.y, 0.012))
-    if heel.z > 0.03:                                           # heel lifted: pivot on the ball of the foot
-        toe = Vector((ank.x + 0.12 * k, ank.y, 0.012))
+    # the foot keeps its length: flat on the ground, or (heel lifted) pivoting on the toe
+    L0 = 0.24 * k
+    heel = Vector((ank.x - 0.055 * k, ank.y, max(0.012, ank.z - 0.073 * k)))
+    lift = min(heel.z - 0.012, 0.6 * L0)
+    toe = Vector((heel.x + math.sqrt(L0 * L0 - lift * lift), ank.y, 0.012))
     d = toe - heel
     L = d.length
     fwd = d.normalized()
@@ -1812,6 +1813,63 @@ def shoe(name, root, ank, mat, sole_mat, k):
     subsurf(smo, 1)
 
 
+def scalp_material(name, skin, hair):
+    """Skin with close-cropped hair, the hairline drawn smoothly in head coordinates (no polygon steps):
+    high at the forehead, sloping down to the nape, and kept above the ears."""
+    m, nt, b = new_mat(name)
+    N, L = nt.nodes, nt.links
+    sb = skin.node_tree.nodes['Principled BSDF']
+    for inp in ('Base Color', 'Roughness', 'Subsurface Weight', 'Subsurface Radius', 'Specular IOR Level'):
+        try:
+            b.inputs[inp].default_value = sb.inputs[inp].default_value
+        except Exception:
+            pass
+    hb = N.new('ShaderNodeBsdfPrincipled')
+    hb.inputs['Base Color'].default_value = hair.node_tree.nodes['Principled BSDF'].inputs['Base Color'].default_value
+    hb.inputs['Roughness'].default_value = 0.55
+    tc = N.new('ShaderNodeTexCoord')
+    sep = N.new('ShaderNodeSeparateXYZ')
+    L.new(tc.outputs['Object'], sep.inputs[0])
+
+    def math_(op, a, b_=None, v=None):
+        n_ = N.new('ShaderNodeMath')
+        n_.operation = op
+        for i, x in enumerate((a, b_)):
+            if x is None:
+                continue
+            if isinstance(x, (int, float)):
+                n_.inputs[i].default_value = x
+            else:
+                L.new(x, n_.inputs[i])
+        return n_.outputs[0]
+    t = N.new('ShaderNodeMapRange')                                  # 0 at the back (x=-0.06) .. 1 at the front (x=0.04)
+    t.interpolation_type = 'SMOOTHSTEP'
+    L.new(sep.outputs[0], t.inputs['Value'])
+    t.inputs['From Min'].default_value = -0.06
+    t.inputs['From Max'].default_value = 0.04
+    line = math_('MULTIPLY_ADD', t.outputs['Result'], 0.105)
+    line.node.inputs[2].default_value = -0.035
+    def ramp(val, lo, hi):                                           # smooth 0..1 between lo and hi
+        r_ = N.new('ShaderNodeMapRange')
+        r_.interpolation_type = 'SMOOTHSTEP'
+        L.new(val, r_.inputs['Value'])
+        r_.inputs['From Min'].default_value = lo
+        r_.inputs['From Max'].default_value = hi
+        return r_.outputs['Result']
+    ear = math_('MULTIPLY', ramp(math_('ABSOLUTE', sep.outputs[1]), 0.035, 0.062), ramp(sep.outputs[0], -0.085, -0.02))
+    line2 = math_('ADD', line, math_('MULTIPLY', ear, math_('MAXIMUM', math_('SUBTRACT', 0.02, line), 0.0)))
+    edge = N.new('ShaderNodeMapRange')                               # a soft 3 mm hairline
+    L.new(math_('SUBTRACT', sep.outputs[2], line2), edge.inputs['Value'])
+    edge.inputs['From Min'].default_value = -0.0015
+    edge.inputs['From Max'].default_value = 0.0015
+    mix = N.new('ShaderNodeMixShader')
+    L.new(edge.outputs['Result'], mix.inputs[0])
+    L.new(b.outputs[0], mix.inputs[1])
+    L.new(hb.outputs[0], mix.inputs[2])
+    L.new(mix.outputs[0], N['Material Output'].inputs['Surface'])
+    return m
+
+
 def head(name, root, J, k, female, skin, hair_col, lip_col, eye_mat, white_mat, style, yaw, pitch):
     """Head with jaw and chin, nose, eyes, brows, lips and ears, and hair."""
     from mathutils import Matrix
@@ -1831,30 +1889,23 @@ def head(name, root, J, k, female, skin, hair_col, lip_col, eye_mat, white_mat, 
             y = w * math.copysign(abs(sa) ** 0.85, sa) * (1 + grow)
             pts.append((x, y, dz * (1 + grow * 0.6)))
         return pts
-    fine = []                                                    # twice as many rings, for a clean hairline
+    fine = []                                                    # four times as many rings, for a clean hairline
     for a_, b_ in zip(prof[:-1], prof[1:]):
-        fine += [a_, tuple((x + y) / 2 for x, y in zip(a_, b_))]
+        fine += [tuple(x + (y - x) * q / 4 for x, y in zip(a_, b_)) for q in range(4)]
     fine.append(prof[-1])
-    hb = loft([ring(*p_, n=32) for p_ in fine])
-    if style != 'bald':                                          # scalp hair: the hair colour on the skull
-        for f in hb.faces:
-            c = f.calc_center_median()
-            front = c.x > 0.02 and c.z < 0.07
-            ears = abs(c.y) > 0.05 and c.z < 0.012 and c.x > -0.035
-            if not front and not ears and c.z > -0.035:
-                f.material_index = 1
-    bmesh.ops.transform(hb, verts=hb.verts, matrix=M)
-    ho = mesh_obj(name + 'Head', hb, [skin, hair_col], parent=root)
+    hb = loft([ring(*p_, n=48) for p_ in fine])
+    # the head mesh stays in head coordinates (the object carries the transform), so the scalp material
+    # can draw the hairline from them
+    ho = mesh_obj(name + 'Head', hb, [skin if style == 'bald' else scalp_material(name + 'Scalp', skin, hair_col)], parent=root)
+    ho.matrix_basis = M
     subsurf(ho, 2)
     # features are placed on the real (subdivided) face surface, measured with rays, so none sink in
     bpy.context.view_layer.update()
     he = ho.evaluated_get(bpy.context.evaluated_depsgraph_get())
-    Mi = M.inverted()
-    back = (M.to_3x3() @ Vector((-1, 0, 0))).normalized()
 
-    def surf_x(y, z):
-        hit, loc, nor, _ = he.ray_cast(M @ Vector((0.3, y, z)), back, distance=2.0)
-        return (Mi @ loc).x if hit else 0.095
+    def surf_x(y, z):                                            # rays in the head's own coordinates
+        hit, loc, nor, _ = he.ray_cast(Vector((0.3, y, z)), Vector((-1, 0, 0)), distance=2.0)
+        return loc.x if hit else 0.095
     fb = bmesh.new()
     # nose: a hull growing out of the face, with a rounded tip and nostril wings
     nx0 = surf_x(0.0, -0.012) - 0.093
@@ -1878,7 +1929,7 @@ def head(name, root, J, k, female, skin, hair_col, lip_col, eye_mat, white_mat, 
         ex = surf_x(sgn * 0.032, 0.035)
         ell(eb, (ex - 0.005, sgn * 0.032, 0.035), (0.0115, 0.0135, 0.0092), 0)       # eyeball, just out of the socket
         ell(eb, (ex + 0.0062, sgn * 0.032, 0.0345), (0.0016, 0.0056, 0.0056), 1)     # iris and pupil
-        ell(eb, (ex - 0.0028, sgn * 0.032, 0.0405), (0.011, 0.0148, 0.0048), 3)     # upper eyelid
+        ell(eb, (ex - 0.0035, sgn * 0.032, 0.0425), (0.0108, 0.0146, 0.0045), 3)     # upper eyelid
         bx = surf_x(sgn * 0.034, 0.055)
         ell(eb, (bx + 0.0005, sgn * 0.034, 0.0545), (0.003, 0.019, 0.0024), 2)       # eyebrow
         ell(eb, (0.0, sgn * 0.077, 0.008), (0.014, 0.0055, 0.026), 3)               # ear
@@ -1973,7 +2024,7 @@ def person(name, loc, yaw, seed, walk=None, phone=None):
         return (r[0] * f + a, r[1] * f + a) if isinstance(r, tuple) else r * f + a
     torso = [((0.165 if female else 0.15) * g * k, (0.11 if female else 0.105) * g * k),     # hips
              ((0.12 if female else 0.13) * g * k, 0.09 * g * k),                             # waist
-             ((0.15 if female else 0.168) * g * k, 0.108 * g * k)]                           # chest
+             ((0.15 if female else 0.168) * g * k, (0.122 if female else 0.108) * g * k)]   # chest
     # ---- bare skin where it shows: the neck, and the arms below the sleeves with hands and thumbs
     V = [J['neck'] + Vector((0, 0, -0.06 * k)), J['neck'], J['head'] + Vector((-0.012, 0, -0.07)) * k]
     R = [0.052 * k, 0.052 * k, 0.05 * k]
@@ -2001,11 +2052,6 @@ def person(name, loc, yaw, seed, walk=None, phone=None):
     sV = [J['pelvis'] + Vector((0, 0, 0.005)), J['waist'], J['chest'], J['neck'] + Vector((0, 0, -0.045 * k))]
     sR = [grow(torso[0], 1.02, 0.004), grow(torso[1], 1.0, 0.006), grow(torso[2], 1.0, 0.006), 0.075 * k]
     sE = [(0, 1), (1, 2), (2, 3)]
-    if female:
-        for sy in (0.048, -0.048):
-            sV.append(J['chest'] + Vector((0.06, sy, -0.04)) * k)
-            sR.append(0.05 * g * k)
-            sE.append((2, len(sV) - 1))
     hems = []
     for sd in ('L', 'R'):
         b0 = len(sV)
@@ -2024,7 +2070,7 @@ def person(name, loc, yaw, seed, walk=None, phone=None):
             hems.append((end, end - sh, 0.05 * g * k))
     skin_obj(S + 'Shirt', root, sV, sE, sR, top, subd=3)
     collar_c = J['neck'] + Vector((0.004, 0, -0.036 * k))
-    band(S + 'Collar', root, collar_c, (0.25, 0, 1), 0.056 * k, 0.009 * k, top)
+    band(S + 'Collar', root, collar_c + Vector((0, 0, -0.006 * k)), (0.25, 0, 1), 0.054 * k, 0.0055 * k, top)
 
     # ---- trousers or jeans: from inside the shirt down to the shoes
     pV = [J['waist'] + Vector((0, 0, -0.03 * k)), J['pelvis']]
@@ -2252,6 +2298,11 @@ PEOPLE_STUDIO = [
     ('people_face', (0.8, -0.45, 1.65), (0.0, -0.45, 1.6), 70, None),
     ('people_hands', (0.75, -2.95, 0.95), (0.02, -2.45, 0.8), 50, None),
     ('people_feet', (1.1, -1.25, 0.32), (0.0, -0.9, 0.08), 35, None),
+    ('people_back', (-5.5, 0.4, 1.45), (0.0, 0.0, 0.95), 35, None),
+    ('people_side', (0.0, -6.5, 1.2), (0.0, 0.0, 0.95), 40, None),
+    ('people_feet_back', (-1.6, 2.6, 0.35), (0.0, 2.25, 0.08), 35, None),
+    ('people_head_side', (0.05, -2.9, 1.62), (0.02, -2.25, 1.6), 60, None),
+    ('people_phone', (1.3, -0.15, 1.6), (0.05, -0.45, 1.35), 40, None),
 ]
 
 
