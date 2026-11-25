@@ -1173,7 +1173,7 @@ def car(name, color, loc, rot_z):
         thin(tail_part('Reverse', cover, 0.0, 0.2, 0.0, 1.0, 12, 12, 0.03), 0.004)
         # side skirt, door handles
         decal(S + 'Skirt', body, mats['dark'], root, lambda u, v, s=s: (-1.0 + u * 2.0, s * 3.0, 0.3 + v * 0.07), (0, -s, 0), 40, 3, 0.004)
-        for hx in (0.25, -0.62):
+        for hx in (-0.02, -0.86):                                     # handles near each door's rear edge
             door_handle(S + 'Handle', body, root, s, hx, 0.815, mats['chrome'], seam)
         # door shut lines from the sill up under the window; the rear door's edge curves round the arch
         side_seam(S + 'DoorFront', body, root, seam, s, [(0.9, 0.955), (0.9, 0.37)])
@@ -1490,7 +1490,7 @@ def car_i20(name, color, loc, rot_z):
         rx = I20_WHEELS[1]
         a0 = math.degrees(math.atan2(0.6 - I20_R, -1.06 - rx))
         side_seam(S + 'DoorRear', body, root, seam, s, [(-1.06, ztop(-1.06)), (-1.06, 0.6)] + arch_path(rx, I20_R, 0.43, a0, 24.0)[1:])
-        for hx in (0.32, -0.6):
+        for hx in (0.05, -0.83):                                      # handles near each door's rear edge
             door_handle(S + 'Handle', body, root, s, hx, 0.945, mats['chrome'], seam)
         decal(S + 'Seam', body, seam, root, lambda u, v, s=s: (0.98 + u * 0.6, s * (0.66 + v * 0.008), 3.0), (0, 0, -1), 24, 1, 0.002)   # hood sides
         decal(S + 'Seam', body, seam, root, lambda u, v, s=s: (-4.0, s * (0.375 + u * 0.008), 0.62 + v * 0.42), (1, 0, 0), 1, 24, 0.002)  # tailgate sides
