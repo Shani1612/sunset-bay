@@ -426,3 +426,12 @@ bpy.ops.export_scene.gltf(filepath=os.path.abspath(OUT), export_format='GLB', us
                           export_extras=True, export_yup=True, export_apply=True,
                           export_vertex_color='ACTIVE')
 print('wrote', os.path.abspath(OUT), os.path.getsize(OUT) // 1024, 'KB')
+# the same models Draco-compressed for the new game (../city), which loads them with three.js's DRACOLoader
+CITY = os.path.join(HERE, '..', 'city', 'assets', 'actors.glb')
+if os.path.isdir(os.path.dirname(CITY)):
+    bpy.ops.export_scene.gltf(filepath=os.path.abspath(CITY), export_format='GLB', use_selection=True,
+                              export_extras=True, export_yup=True, export_apply=True, export_vertex_color='ACTIVE',
+                              export_draco_mesh_compression_enable=True, export_draco_mesh_compression_level=7,
+                              export_draco_position_quantization=14, export_draco_normal_quantization=10,
+                              export_draco_texcoord_quantization=14, export_draco_color_quantization=10)
+    print('wrote', os.path.abspath(CITY), os.path.getsize(CITY) // 1024, 'KB')

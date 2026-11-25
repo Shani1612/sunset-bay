@@ -64,13 +64,47 @@ def principled(name, color, rough=0.5, metal=0.0, coat=0.0, coat_rough=0.03, emi
     return m
 
 
-def textured(name, kind, c1, c2, mortar=None, scale=1.0, rough=0.85, bump=0.25, rough_var=0.1):
-    """Procedural surfaces in object space (metres): brick / blocks / plaster / asphalt / concrete slabs."""
+TEX_ARGS = {}      # name -> the arguments of each textured() material, so it can be rebuilt as a tile for baking
+
+
+def textured(name, kind, c1, c2, mortar=None, scale=1.0, rough=0.85, bump=0.25, rough_var=0.1, tile=None):
+    """Procedural surfaces in object space (metres): brick / blocks / plaster / asphalt / concrete slabs.
+    tile=(width, height) in metres: the same surface on a UV square that repeats seamlessly (for baking game
+    textures): the noise runs on a torus (4D noise), so its left/right and top/bottom edges meet."""
+    if tile is None:
+        TEX_ARGS[name] = (kind, c1, c2, mortar, scale, rough, bump, rough_var)
     m, nt, b = new_mat(name)
     N, L = nt.nodes, nt.links
     tc = N.new('ShaderNodeTexCoord')
     mp = N.new('ShaderNodeMapping')
-    if kind in ('brick', 'blocks'):
+    if tile is not None:
+        # u, v in 0..1 -> brick coordinates in metres, and periodic 4D noise coordinates
+        sep = N.new('ShaderNodeSeparateXYZ')
+        L.new(tc.outputs['UV'], sep.inputs[0])
+
+        def op(o, a, b_=None):
+            n_ = N.new('ShaderNodeMath')
+            n_.operation = o
+            for i, x in enumerate((a, b_)):
+                if x is None:
+                    continue
+                if isinstance(x, (int, float)):
+                    n_.inputs[i].default_value = x
+                else:
+                    L.new(x, n_.inputs[i])
+            return n_.outputs[0]
+        tw, th = tile
+        ang_u, ang_v = op('MULTIPLY', sep.outputs[0], 2 * math.pi), op('MULTIPLY', sep.outputs[1], 2 * math.pi)
+        ru, rv = tw / (2 * math.pi) * scale, th / (2 * math.pi) * scale
+        torus = N.new('ShaderNodeCombineXYZ')
+        L.new(op('MULTIPLY', op('COSINE', ang_u), ru), torus.inputs[0])
+        L.new(op('MULTIPLY', op('SINE', ang_u), ru), torus.inputs[1])
+        L.new(op('MULTIPLY', op('COSINE', ang_v), rv), torus.inputs[2])
+        torus_w = op('MULTIPLY', op('SINE', ang_v), rv)
+        flat = N.new('ShaderNodeCombineXYZ')
+        L.new(op('MULTIPLY', sep.outputs[0], tw * scale), flat.inputs[0])
+        L.new(op('MULTIPLY', sep.outputs[1], th * scale), flat.inputs[1])
+    elif kind in ('brick', 'blocks'):
         # wall texture plane: u = x + y runs along both the street front and the side walls, v = height
         sep = N.new('ShaderNodeSeparateXYZ')
         L.new(tc.outputs['Object'], sep.inputs[0])
@@ -88,11 +122,16 @@ def textured(name, kind, c1, c2, mortar=None, scale=1.0, rough=0.85, bump=0.25, 
     noise = N.new('ShaderNodeTexNoise')
     noise.inputs['Scale'].default_value = 3.0
     noise.inputs['Detail'].default_value = 8.0
-    L.new(mp.outputs['Vector'], noise.inputs['Vector'])
     fine = N.new('ShaderNodeTexNoise')
     fine.inputs['Scale'].default_value = 60.0
     fine.inputs['Detail'].default_value = 6.0
-    L.new(mp.outputs['Vector'], fine.inputs['Vector'])
+    for nz in (noise, fine):
+        if tile is not None:
+            nz.noise_dimensions = '4D'
+            L.new(torus.outputs[0], nz.inputs['Vector'])
+            L.new(torus_w, nz.inputs['W'])
+        else:
+            L.new(mp.outputs['Vector'], nz.inputs['Vector'])
     ramp = N.new('ShaderNodeValToRGB')
     ramp.color_ramp.elements[0].color = (*c1, 1)
     ramp.color_ramp.elements[1].color = (*c2, 1)
@@ -100,7 +139,7 @@ def textured(name, kind, c1, c2, mortar=None, scale=1.0, rough=0.85, bump=0.25, 
     height = fine.outputs['Fac']
     if kind in ('brick', 'blocks', 'slabs'):
         br = N.new('ShaderNodeTexBrick')
-        L.new(mp.outputs['Vector'], br.inputs['Vector'])
+        L.new(flat.outputs[0] if tile is not None else mp.outputs['Vector'], br.inputs['Vector'])
         L.new(ramp.outputs['Color'], br.inputs['Color1'])
         # second brick colour: the same noise ramp, slightly darker
         dark = N.new('ShaderNodeMix')
@@ -446,22 +485,33 @@ def street_lamp(x, y, side):
     lo.location = (0, -2.05, 7.15)
 
 
+def hydrant(bm, x, y, z=0.15):
+    bm_cyl(bm, x, y, z, z + 0.6, 0.13, 16, 0)
+    bm_cyl(bm, x, y, z + 0.6, z + 0.71, 0.15, 16, 0)
+    bm_cyl(bm, x, y, z + 0.71, z + 0.8, 0.08, 16, 0)
+    bm_box(bm, x - 0.22, y - 0.05, z + 0.35, x + 0.22, y + 0.05, z + 0.45, 0)
+
+
+def trash_can(bm, x, y, z=0.15):
+    bm_cyl(bm, x, y, z, z + 0.9, 0.3, 20, 0)
+
+
+def bollard(bm, x, y, z=0.15):
+    bm_cyl(bm, x, y, z, z + 0.85, 0.08, 12, 0)
+
+
 def props():
     bm = bmesh.new()
     for x, s in ((-20, 1), (22, -1), (52, 1)):                           # hydrants
-        y = 8.3 * s
-        bm_cyl(bm, x, y, 0.15, 0.75, 0.13, 16, 0)
-        bm_cyl(bm, x, y, 0.75, 0.86, 0.15, 16, 0)
-        bm_cyl(bm, x, y, 0.86, 0.95, 0.08, 16, 0)
-        bm_box(bm, x - 0.22, y - 0.05, 0.5, x + 0.22, y + 0.05, 0.6, 0)
+        hydrant(bm, x, 8.3 * s)
     mesh_obj('Hydrants', bm, [M['hydrant']], bevel=0.01)
     bm = bmesh.new()
     for x, s in ((-2, 1), (36, -1), (64, -1)):                           # trash cans
-        bm_cyl(bm, x, 8.4 * s, 0.15, 1.05, 0.3, 20, 0)
+        trash_can(bm, x, 8.4 * s)
     for x in [x for x in range(-40, 100, 6)]:                            # bollards near the crosswalk
         if 20 < x < 40:
             for s in (1, -1):
-                bm_cyl(bm, x, 7.95 * s, 0.15, 1.0, 0.08, 12, 0)
+                bollard(bm, x, 7.95 * s)
     mesh_obj('StreetFurniture', bm, [M['lamp_pole']], bevel=0.01)
 
 
