@@ -4,14 +4,17 @@ A low-poly open-city game that runs in the browser (desktop and phone).
 
 Play: open `index.html`, or the GitHub Pages link of this repository.
 
-## Sunset Bay Downtown (`city/`)
+## Sunset Bay, the white city (`city/`)
 
-A second, new game built entirely from the Blender scene: open `city/` on the GitHub Pages link. It's a downtown of
-3 × 3 blocks inside a ring of buildings, made of the Blender buildings (brick, stone, plaster and concrete facades
-with real window openings, frames, sills, cornices, balconies, AC units, lit shops with signs and awnings), streets
-with markings, crosswalks and traffic lights, the street lamps, hydrants, bins and bollards, and the i20, the sedan and
-the people. Traffic drives on lanes and stops at red lights, pedestrians walk around the blocks and cross with the
-lights, and you can walk, take any car, and do delivery and taxi jobs.
+A second game built entirely from Blender models, in Hebrew. Open `city/` on the GitHub Pages link. It's a Mediterranean
+city by the sea on a sunny day:
+- **The city:** white Bauhaus buildings (long balconies with rounded ends, ribbon windows, shutters, AC units, solar
+  water heaters, shops with Hebrew signs), white classic buildings, and a district of glass towers, with more towers on
+  the skyline.
+- **The seafront:** a promenade with palms and benches, a beach with umbrellas, and the sea.
+- **The streets:** palms and trees, lamps, crosswalks and traffic lights.
+- **Cars and people:** Hyundai i20s and sedans with Israeli number plates, and people. Traffic stops at red lights,
+  pedestrians cross with the lights, and you can walk, take any car, and do delivery and taxi jobs (paid in shekels).
 
 The assets come from `blender/export_city_assets.py` (`city/assets/city.glb` and the textures in `city/assets/tex/`)
 and `blender/export_game_assets.py` (`city/assets/actors.glb`). Like the cars and people in the first game, they load
