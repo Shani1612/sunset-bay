@@ -26,6 +26,19 @@ blender --background --python sunset_bay_city.py -- renders --peoplestudio   # s
 
 It also runs with the `bpy` Python module (`pip install bpy`): `python sunset_bay_city.py -- renders`.
 
+## City for the new game
+
+```
+blender --background --python export_city_assets.py      # or: python export_city_assets.py
+```
+
+writes `../city/assets/city.glb` and `../city/assets/tex/`, for the new game in `../city/`:
+- **Textures:** the procedural brick, stone, plaster, concrete, roof, asphalt, paving and curb materials, baked to seamless tiles. The noise runs on a torus, so the edges meet. There's an albedo and a normal map for each.
+- **20 building variants:** each comes in full detail and in a light version with plain windows, for distance.
+- **Props:** the street lamp, hydrant, bin, bollard, manhole and a traffic signal.
+
+Everything is Draco-compressed (under 1 MB).
+
 ## Game models
 
 ```
