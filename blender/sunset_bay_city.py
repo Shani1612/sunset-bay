@@ -772,6 +772,8 @@ def car(name, color, loc, rot_z, lights_on=True):
             ret = bmesh.ops.create_cone(lbm, cap_ends=True, segments=48, radius1=0.385, radius2=0.385, depth=0.5)
             bmesh.ops.rotate(lbm, verts=ret['verts'], cent=(0, 0, 0), matrix=__import__('mathutils').Matrix.Rotation(math.pi / 2, 3, 'X'))
             bmesh.ops.translate(lbm, verts=ret['verts'], vec=(wx, s * 0.5, 0.345))
+    # only the arch above the wheel centre: the lower half would stick out under the car
+    bmesh.ops.delete(lbm, geom=[v for v in lbm.verts if v.co.z < 0.3], context='VERTS')
     mesh_obj(name + '_Liner', lbm, [mats['dark']], parent=root)
     bpy.context.view_layer.update()
 
