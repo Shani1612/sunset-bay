@@ -1,4 +1,4 @@
-"""Export the Blender city (buildings, street props, surface textures) for the new game in ../city/.
+"""Export the Blender city (buildings, street props, trees, surface textures) for the game in ../city/.
 
     python export_city_assets.py            (with the bpy module)
     blender --background --python export_city_assets.py
@@ -34,12 +34,11 @@ scene = bpy.context.scene
 QUICK = '--quick' in sys.argv
 
 # texture tiles in metres (a whole number of brick / block / slab periods, so the patterns repeat seamlessly)
-TILES = {
-    'brick_red': ('BrickRed', 4.0, 3.6), 'brick_brown': ('BrickBrown', 4.0, 3.6), 'stone': ('Stone', 4.8, 4.8),
-    'plaster_pink': ('PlasterPink', 4.0, 4.0), 'plaster_cream': ('PlasterCream', 4.0, 4.0),
-    'plaster_teal': ('PlasterTeal', 4.0, 4.0), 'concrete': ('ConcreteWall', 4.8, 4.8),
-    'roof': ('RoofTar', 4.0, 4.0), 'asphalt': ('Asphalt', 6.0, 6.0), 'sidewalk': ('Sidewalk', 6.0, 6.0),
-    'curb': ('Curb', 2.0, 2.0),
+TILES = {   # the white city: light plaster and stone, roof, light asphalt and paving, curb, beach sand
+    'plaster_white': ('PlasterWhite', 4.0, 4.0), 'plaster_offwhite': ('PlasterOffwhite', 4.0, 4.0),
+    'stone_light': ('StoneLight', 4.8, 4.8), 'roof': ('RoofTar', 4.0, 4.0),
+    'asphalt_light': ('AsphaltLight', 6.0, 6.0), 'sidewalk_light': ('SidewalkLight', 6.0, 6.0),
+    'curb': ('Curb', 2.0, 2.0), 'sand': ('Sand', 6.0, 6.0),
 }
 
 
@@ -162,7 +161,17 @@ def building_material(m):
         return simple('RoofWood', base_color(m), 0.7), None
     if n == 'Metal':
         return simple('Metal', base_color(m), 0.35, 1.0), None
-    return simple('Misc_' + n, base_color(m), 0.6), None
+    return keep_named(m, n), None
+
+
+def keep_named(m, n):
+    """Any other material, simplified under its own name (the game looks materials up by name)."""
+    try:
+        b = m.node_tree.nodes['Principled BSDF']
+        r, mt = b.inputs['Roughness'].default_value, b.inputs['Metallic'].default_value
+    except Exception:
+        r, mt = 0.6, 0.0
+    return simple(n, base_color(m), r, mt)
 
 
 # ---------------------------------------------------------------- mesh helpers
@@ -245,36 +254,48 @@ def drop(root):
 
 
 # ---------------------------------------------------------------- buildings
-# (facade width, floors, style): low and tall, narrow and wide, every style; widths up to 16 m fit the short
-# sides of the game's blocks
+# the white city: Bauhaus blocks (kind, style, shops or columns), white classic buildings, and glass towers
 VARIANTS = [
-    (12.0, 5, 'brick_red'), (14.5, 7, 'plaster_cream'), (10.5, 9, 'stone'), (15.5, 6, 'brick_brown'),
-    (11.0, 4, 'plaster_pink'), (13.0, 11, 'concrete'), (16.0, 8, 'plaster_teal'), (9.5, 6, 'brick_brown'),
-    (13.5, 13, 'stone'), (12.5, 7, 'plaster_pink'), (10.0, 5, 'plaster_teal'), (14.0, 10, 'brick_red'),
-    (11.5, 8, 'concrete'), (15.0, 5, 'stone'), (12.0, 12, 'plaster_cream'), (13.0, 6, 'brick_red'),
-    (10.5, 7, 'plaster_cream'), (14.5, 9, 'brick_brown'), (9.5, 4, 'stone'), (16.0, 14, 'concrete'),
+    ('bauhaus', 14.0, 5, 'balcony', 'plaster_white', True), ('bauhaus', 16.0, 4, 'ribbon', 'plaster_offwhite', False),
+    ('bauhaus', 15.0, 6, 'mixed', 'plaster_white', True), ('bauhaus', 12.0, 4, 'balcony', 'stone_light', True),
+    ('bauhaus', 18.0, 5, 'ribbon', 'plaster_white', True), ('bauhaus', 13.0, 5, 'mixed', 'plaster_offwhite', False),
+    ('bauhaus', 16.0, 6, 'balcony', 'plaster_white', True), ('bauhaus', 11.0, 4, 'ribbon', 'plaster_white', True),
+    ('bauhaus', 20.0, 7, 'mixed', 'plaster_white', True), ('bauhaus', 14.0, 3, 'balcony', 'plaster_offwhite', True),
+    ('bauhaus', 15.5, 5, 'ribbon', 'stone_light', True), ('bauhaus', 12.5, 6, 'balcony', 'plaster_white', False),
+    ('classic', 14.0, 5, 'plaster_white'), ('classic', 12.0, 4, 'stone_light'), ('classic', 15.0, 6, 'plaster_offwhite'),
+    ('classic', 11.0, 4, 'plaster_white'),
+    ('tower', 40.0, 22, False), ('tower', 40.0, 30, True), ('tower', 40.0, 26, False), ('tower', 40.0, 36, True),
 ]
 if QUICK:
-    VARIANTS = VARIANTS[:3]
-
-
-def wall_tile(kind):
-    return (4.0, 4.0) if kind == 'roof' else None
+    VARIANTS = VARIANTS[:2] + VARIANTS[12:13] + VARIANTS[16:17]
 
 
 def export_buildings():
-    for i, (W, floors, style) in enumerate(VARIANTS):
+    for i, v in enumerate(VARIANTS):
         for detailed in (True, False):
-            random.seed(1000 + i)                       # the same lit windows and sign colours in both versions
-            root = G['building']('Bx%d' % i, 0.0, 1, W, floors, style, detailed=detailed)
+            random.seed(1000 + i)                       # the same windows and sign colours in both versions
+            name = 'Bx%d' % i
+            if v[0] == 'bauhaus':
+                _, W, floors, kind, style, shop = v
+                root = G['bauhaus'](name, 0.0, 1, W, floors, kind, style=style, shop=shop, detailed=detailed, seed=i)
+            elif v[0] == 'classic':
+                _, W, floors, style = v
+                root = G['building'](name, 0.0, 1, W, floors, style, detailed=detailed, letters=False)
+            else:
+                _, W, floors, rnd_ = v
+                style = 'stone_light'
+                root = G['tower'](name, 0.0, 1, W, W, floors, round_=rnd_, detailed=detailed, seed=i)
             bpy.context.view_layer.update()
             pieces = [o for o in bpy.data.objects if o.parent == root and o.type in ('MESH', 'FONT')]
             _, tw, th = TILES[style]
             tiles = {'wall': (tw, th), 'roof': (4.0, 4.0)}
-            top = 4.4 + (floors - 1) * 3.3
+            sign = list(root.get('sign', []))
+            extras = {'W': W, 'depth': float(root['depth']), 'top': round(float(root['top']), 3), 'floors': floors,
+                      'style': style, 'type': v[0]}
+            if sign:   # the sign board's front, in glTF axes: x0, x1, z of its face, y0, y1
+                extras['sign'] = [round(sign[0], 3), round(sign[1], 3), round(-sign[2], 3), round(sign[3], 3), round(sign[4], 3)]
             ob = bake_object('B%d' % i + ('' if detailed else 'L'), pieces, building_material, root.matrix_world.inverted(),
-                             uv_tile=tiles.get, extras={'W': W, 'depth': 18.0, 'top': round(top, 3), 'floors': floors,
-                                                        'style': style})
+                             uv_tile=tiles.get, extras=extras)
             EXPORT.append(ob)
             drop(root)
 
@@ -291,7 +312,7 @@ def prop_material(m):
         return simple(nm, base_color(m), r, mt), None
     if n.startswith('Lens'):
         return SIMPLE[n], None
-    return simple('Misc_' + n, base_color(m), 0.6), None
+    return keep_named(m, n), None
 
 
 def prop(name, build, mats, extras=None):
@@ -340,6 +361,22 @@ def export_props():
             bb(bm, 0.115, -0.42, z - 0.06, 0.135, -0.2, z + 0.135, 1)
     prop('Signal', signal, [M['lamp_pole'], M['dark'], SIMPLE['LensRed'], SIMPLE['LensAmber'], SIMPLE['LensGreen']],
          extras={'lens_y': -0.215, 'lens_z': [3.6, 3.28, 2.96]})
+    # palms (three heights), street trees (two), a bench; each also as a light version for distance
+    for k, (H, seed) in enumerate(((8.5, 3), (11.0, 7), (13.5, 11))):
+        for d in (True, False):
+            src = G['palm']('PalmSrc', H, seed, detailed=d)
+            out = bake_object('Palm%d%s' % (k, '' if d else 'L'), [src], prop_material, src.matrix_world.inverted(), extras={'height': H})
+            bpy.data.objects.remove(src)
+            EXPORT.append(out)
+    for k, (H, seed) in enumerate(((6.5, 2), (8.0, 5))):
+        for d in (True, False):
+            src = G['leafy_tree']('TreeSrc', H, seed, detailed=d)
+            out = bake_object('Tree%d%s' % (k, '' if d else 'L'), [src], prop_material, src.matrix_world.inverted(), extras={'height': H})
+            bpy.data.objects.remove(src)
+            EXPORT.append(out)
+    src = G['bench']('BenchSrc')
+    EXPORT.append(bake_object('Bench', [src], prop_material, src.matrix_world.inverted()))
+    bpy.data.objects.remove(src)
 
 
 # ---------------------------------------------------------------- go

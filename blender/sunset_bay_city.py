@@ -235,6 +235,31 @@ TRIM = {
 }
 
 
+# ---------------------------------------------------------------- the white city: a Mediterranean daytime look
+# (light plaster and stone, Bauhaus blocks, glass towers, palms), used by export_city_assets.py for the game
+NYC_STYLES = list(WALLS.keys())
+WALLS['plaster_white'] = textured('PlasterWhite', 'plaster', srgb('#e4e0d6'), srgb('#f2f0ea'), rough=0.9, bump=0.12)
+WALLS['plaster_offwhite'] = textured('PlasterOffwhite', 'plaster', srgb('#dad1c1'), srgb('#e9e3d6'), rough=0.9, bump=0.12)
+WALLS['stone_light'] = textured('StoneLight', 'blocks', srgb('#dacbad'), srgb('#e9ddc4'), mortar=srgb('#c8b99a'), rough=0.8, bump=0.25)
+TRIM['plaster_white'] = principled('TrimWhiteSmooth', srgb('#f2f0eb'), rough=0.55)
+TRIM['plaster_offwhite'] = principled('TrimOffwhite', srgb('#eeeae1'), rough=0.55)
+TRIM['stone_light'] = principled('TrimStoneLight', srgb('#ebe2ce'), rough=0.7)
+M['sidewalk_light'] = textured('SidewalkLight', 'slabs', srgb('#cdc1a7'), srgb('#dcd1ba'), mortar=srgb('#ada28a'), scale=2.5, rough=0.85, bump=0.25)
+M['asphalt_light'] = textured('AsphaltLight', 'plaster', srgb('#535458'), srgb('#696a6e'), rough=0.86, bump=0.3)
+M['sand'] = textured('Sand', 'plaster', srgb('#d6bd8c'), srgb('#ebd8ab'), rough=0.95, bump=0.5)
+M['shutter'] = principled('Shutter', srgb('#d4d2cb'), rough=0.6)
+M['solar'] = principled('SolarPanel', srgb('#1a2a46'), rough=0.12, metal=0.3)
+M['tank'] = principled('SolarTank', srgb('#e2e2de'), rough=0.4, metal=0.3)
+M['tower_glass'] = principled('TowerGlass', srgb('#3c6890'), rough=0.05, metal=0.8)
+M['fin'] = principled('TowerFin', srgb('#c6cad0'), rough=0.35, metal=0.6)
+M['palm_trunk'] = principled('PalmTrunk', srgb('#6c5c47'), rough=0.9)
+M['palm_leaf'] = principled('PalmLeaf', srgb('#4c7c33'), rough=0.6)
+M['palm_dry'] = principled('PalmLeafDry', srgb('#a68b50'), rough=0.8)
+M['bench_wood'] = principled('BenchWood', srgb('#9a6a3b'), rough=0.7)
+M['bark'] = principled('TreeBark', srgb('#5c4a39'), rough=0.9)
+M['leaves'] = principled('Leaves', srgb('#3e6a2d'), rough=0.7)
+
+
 # ---------------------------------------------------------------- mesh helpers
 def bm_hex(bm, p, mi=0):
     """8 corners in box order (bottom 0-3 counter-clockwise from x0y0, then top 4-7) -> closed solid."""
@@ -295,7 +320,7 @@ SIGN_COLORS = ['#c0392b', '#1f5f99', '#2a7d4f', '#7d2a6e', '#b8860b', '#1c1c1c']
 AWNING_COLORS = ['#8e1f1f', '#1f4e79', '#225c3a', '#5b2a66', '#7a5a1f', '#2a2a2a']
 
 
-def building(name, x0, side, W, floors, style, detailed=True, depth=18.0):
+def building(name, x0, side, W, floors, style, detailed=True, depth=18.0, letters=True):
     """A building whose street facade is at |y| = 12.5. side=+1: north side (faces -y), -1: south side."""
     if side > 0:
         root = empty(name, (x0, 12.5, 0), 0.0)
@@ -397,8 +422,11 @@ def building(name, x0, side, W, floors, style, detailed=True, depth=18.0):
     bm_box(bm, 0, 0, top + 0.25, W, T, top + 1.15, 0)
     bm_box(bm, -0.04, -0.06, top + 1.15, W + 0.04, T + 0.04, top + 1.25, 1)
     ob = mesh_obj(name + '_Mesh', bm, mats, parent=root, bevel=0.012 if detailed else 0.0)
+    root['sign'] = [0.3, W - 0.3, -0.18, 3.42, 4.15]
+    root['depth'] = depth
+    root['top'] = top + 1.25
     # ---- shop sign lettering
-    if detailed:
+    if detailed and letters:
         cu = bpy.data.curves.new(name + '_Text', 'FONT')
         cu.body = random.choice(SHOP_NAMES)
         cu.align_x = 'CENTER'
@@ -513,6 +541,391 @@ def props():
             for s in (1, -1):
                 bollard(bm, x, 7.95 * s)
     mesh_obj('StreetFurniture', bm, [M['lamp_pole']], bevel=0.01)
+
+
+# ---------------------------------------------------------------- the white city: buildings, palms, trees, benches
+def facade_floor(bm, W, T, z0, z1, ops, mi=0):
+    """One storey of facade wall (x 0..W, y 0..T, z0..z1) with openings ops = [(a, b, oz0, oz1)], sorted by a."""
+    x = 0.0
+    for a, b, oz0, oz1 in ops:
+        if a - x > 0.001:
+            bm_box(bm, x, 0, z0, a, T, z1, mi)
+        if oz0 - z0 > 0.001:
+            bm_box(bm, a, 0, z0, b, T, oz0, mi)
+        if z1 - oz1 > 0.001:
+            bm_box(bm, a, 0, oz1, b, T, z1, mi)
+        x = b
+    if W - x > 0.001:
+        bm_box(bm, x, 0, z0, W, T, z1, mi)
+
+
+def glazing(bm, a, b, z0, z1, T, detailed, rnd, pitch=1.3, shutters=True, glass=3, frame=2, shutter=5):
+    """Glass recessed in an opening, with an aluminium frame and mullions, and sometimes a roll shutter part
+    way down (the light 'trisim' of Israeli flats)."""
+    g0 = T - 0.1
+    bm_box(bm, a, g0, z0, b, g0 + 0.02, z1, glass)
+    if not detailed:
+        return
+    fw = 0.05
+    for (p0, p1, q0, q1) in ((a, a + fw, z0, z1), (b - fw, b, z0, z1), (a, b, z0, z0 + fw), (a, b, z1 - fw, z1)):
+        bm_box(bm, p0, g0 - 0.04, q0, p1, g0 + 0.03, q1, frame)
+    n = max(1, int((b - a) / pitch + 0.5))
+    for k in range(1, n):
+        x = a + (b - a) * k / n
+        bm_box(bm, x - 0.025, g0 - 0.04, z0, x + 0.025, g0 + 0.03, z1, frame)
+    if shutters and rnd.random() < 0.45:
+        h = (z1 - z0) * rnd.uniform(0.15, 0.95)
+        bm_box(bm, a + 0.03, g0 - 0.08, z1 - h, b - 0.03, g0 - 0.045, z1 - 0.02, shutter)
+
+
+def solar_heater(bm, x, y, z, mi_panel, mi_tank, mi_frame):
+    """A rooftop solar water heater: a tilted collector panel and a white tank behind it on a frame."""
+    from mathutils import Matrix
+    ret = bmesh.ops.create_cube(bm, size=1.0)
+    bmesh.ops.scale(bm, vec=(1.0, 2.0, 0.07), verts=ret['verts'])
+    bmesh.ops.rotate(bm, verts=ret['verts'], cent=(0, 0, 0), matrix=Matrix.Rotation(math.radians(-38), 3, 'X'))
+    bmesh.ops.translate(bm, verts=ret['verts'], vec=(x, y, z + 0.75))
+    for f in {f for v in ret['verts'] for f in v.link_faces}:
+        f.material_index = mi_panel
+    ret = bmesh.ops.create_cone(bm, cap_ends=True, segments=14, radius1=0.28, radius2=0.28, depth=1.3)
+    bmesh.ops.rotate(bm, verts=ret['verts'], cent=(0, 0, 0), matrix=Matrix.Rotation(math.pi / 2, 3, 'Y'))
+    bmesh.ops.translate(bm, verts=ret['verts'], vec=(x, y + 0.95, z + 1.55))
+    for f in {f for v in ret['verts'] for f in v.link_faces}:
+        f.material_index = mi_tank
+    for dx in (-0.45, 0.45):
+        bm_box(bm, x + dx - 0.03, y - 0.8, z, x + dx + 0.03, y - 0.74, z + 0.2, mi_frame)
+        bm_box(bm, x + dx - 0.03, y + 0.75, z, x + dx + 0.03, y + 0.81, z + 1.3, mi_frame)
+
+
+def bauhaus(name, x0, side, W, floors, kind, style='plaster_white', shop=True, detailed=True, depth=16.0, seed=0):
+    """A Tel Aviv-style modernist block: white plaster, long balconies with rounded ends and solid parapets, ribbon
+    windows under thin sun ledges, a glazed stairwell (the 'thermometer' window), roll shutters, AC units, a flat
+    roof with solar water heaters; shops under a concrete canopy, or an open ground floor on columns (pilotis).
+    kind: 'balcony', 'ribbon' or 'mixed'. The facade is at |y| = 12.5, like building()."""
+    rnd = random.Random(seed)
+    if side > 0:
+        root = empty(name, (x0, 12.5, 0), 0.0)
+    else:
+        root = empty(name, (x0 + W, -12.5, 0), math.pi)
+    GH, FH = 4.0, 3.0
+    top = GH + (floors - 1) * FH
+    wall, trim = WALLS[style], TRIM[style]
+    mats = [wall, trim, M['frame_d'], M['glass'], M['glass_shop'], M['shutter'], M['roof'], M['ac'], M['solar'], M['tank'],
+            M['metal']]
+    bm = bmesh.new()
+    T = 0.25
+    # ---- the mass, and the ground floor
+    if shop:
+        bm_box(bm, 0, T, 0, W, depth, top, 0)
+        bm_box(bm, 0, 0, 0, W, T, 0.3, 1)                                  # plinth
+        bm_box(bm, 0, 0, 3.3, W, T, GH, 0)                                 # wall over the shops
+        bm_box(bm, 0, 0, 0.3, 0.4, T, 3.3, 0)
+        bm_box(bm, W - 0.4, 0, 0.3, W, T, 3.3, 0)
+        gx0, gx1 = 0.4, W - 0.4
+        bm_box(bm, gx0, T - 0.1, 0.3, gx1, T - 0.08, 3.3, 4)               # shop windows
+        nmul = max(2, int((gx1 - gx0) / 2.4))
+        for k in range(nmul + 1):
+            x = gx0 + (gx1 - gx0) * k / nmul
+            bm_box(bm, x - 0.04, T - 0.16, 0.3, x + 0.04, T - 0.06, 3.3, 2)
+        bm_box(bm, gx0, T - 0.16, 2.55, gx1, T - 0.06, 2.62, 2)            # transom
+        signm = principled(name + '_Sign', srgb(random.choice(SIGN_COLORS)), rough=0.4)
+        mats.append(signm)
+        bm_box(bm, 0.3, -0.14, 3.4, W - 0.3, 0.0, 3.92, len(mats) - 1)     # sign board (the game writes on it)
+        root['sign'] = [0.3, W - 0.3, -0.14, 3.4, 3.92]
+        if rnd.random() < 0.45:                                            # a fabric awning ...
+            awm = principled(name + '_Awning', srgb(random.choice(AWNING_COLORS)), rough=0.9)
+            mats.append(awm)
+            ai = len(mats) - 1
+            bm_hex(bm, [(0.6, -1.5, 2.6), (W - 0.6, -1.5, 2.6), (W - 0.6, -0.05, 3.25), (0.6, -0.05, 3.25),
+                        (0.6, -1.5, 2.64), (W - 0.6, -1.5, 2.64), (W - 0.6, -0.05, 3.29), (0.6, -0.05, 3.29)], ai)
+            bm_box(bm, 0.6, -1.52, 2.35, W - 0.6, -1.48, 2.64, ai)
+        else:                                                              # ... or a concrete canopy along the front
+            bm_box(bm, 0, -1.3, 3.28, W, 0, 3.4, 1)
+    else:
+        # pilotis: the ground floor open under the building, on round columns, with a glazed lobby set back
+        bm_box(bm, 0, 3.2, 0, W, depth, GH, 0)
+        bm_box(bm, 0, T, GH, W, depth, top, 0)
+        bm_box(bm, 0, 0, GH - 0.35, W, T, GH, 0)                           # edge beam
+        n = max(2, int(W / 4.5)) + 1
+        for k in range(n):
+            x = 0.4 + (W - 0.8) * k / (n - 1)
+            bm_cyl(bm, x, 0.5, 0, GH - 0.35, 0.18, 14 if detailed else 8, 1)
+        bm_box(bm, W / 2 - 1.1, 3.1, 0, W / 2 + 1.1, 3.15, 2.5, 3)          # lobby door
+        if detailed:
+            bm_box(bm, W / 2 - 1.15, 3.05, 2.5, W / 2 + 1.15, 3.2, 2.6, 2)
+        root['sign'] = []
+    # ---- upper floors
+    stair = W / 2
+    for f in range(1, floors):
+        zf = GH + (f - 1) * FH
+        z1 = zf + FH
+        ops = []
+        if kind in ('balcony', 'mixed'):
+            spans = [(0.5, W - 0.5)] if kind == 'balcony' else [(0.5, stair - 1.0), (stair + 1.0, W - 0.5)]
+            for (bx0, bx1) in spans:
+                if bx1 - bx0 < 2.6:
+                    continue
+                nb = max(1, int((bx1 - bx0) / 3.2))
+                for i in range(nb):
+                    c = bx0 + (bx1 - bx0) * (i + 0.5) / nb
+                    ops.append((c - 0.8, c + 0.8, zf + 0.1, zf + 2.3))     # balcony doors
+            if kind == 'mixed':
+                ops.append((stair - 0.6, stair + 0.6, zf + 0.25, z1 - 0.25))
+        else:
+            ops.append((0.7, W - 0.7, zf + 0.95, zf + 2.25))                # one long ribbon window
+        ops.sort()
+        facade_floor(bm, W, T, zf, z1, ops, 0)
+        for (a, b, oz0, oz1) in ops:
+            stairwell = kind == 'mixed' and abs((a + b) / 2 - stair) < 0.01
+            glazing(bm, a, b, oz0, oz1, T, detailed, rnd, pitch=1.3 if b - a > 2 else 0.4, shutters=b - a < 3 and not stairwell)
+        if kind in ('balcony', 'mixed'):
+            for (bx0, bx1) in ([(0.5, W - 0.5)] if kind == 'balcony' else [(0.3, stair - 0.85), (stair + 0.85, W - 0.3)]):
+                if bx1 - bx0 < 2.6:
+                    continue
+                r = 0.65
+                seg = 20 if detailed else 8
+                bm_box(bm, bx0 + r, -2 * r, zf - 0.05, bx1 - r, 0, zf + 0.12, 1)        # slab
+                bm_box(bm, bx0 + r, -2 * r, zf + 0.12, bx1 - r, -2 * r + 0.12, zf + 1.05, 1)  # solid parapet
+                for cx in (bx0 + r, bx1 - r):                                            # rounded ends
+                    bm_cyl(bm, cx, -r, zf - 0.04, zf + 1.05, r, seg, 1)      # (1 cm off the slab's underside: no coplanar faces)
+                if detailed:
+                    bm_box(bm, bx0 + r, -2 * r - 0.02, zf + 1.05, bx1 - r, -2 * r + 0.14, zf + 1.1, 1)
+                    if rnd.random() < 0.55:                                              # an AC unit on the balcony
+                        x = rnd.uniform(bx0 + r, bx1 - r - 0.9)
+                        bm_box(bm, x, -0.5, zf + 0.12, x + 0.85, -0.15, zf + 0.7, 7)
+        else:
+            bm_box(bm, 0.55, -0.12, zf + 0.85, W - 0.55, T - 0.1, zf + 0.95, 1)            # sill
+            bm_box(bm, 0.3, -0.7, zf + 2.38, W - 0.3, 0, zf + 2.5, 1)                     # sun ledge
+            if detailed:
+                for i in range(int(W / 3.5)):
+                    if rnd.random() < 0.35:                                              # AC units under the window
+                        x = 0.8 + i * 3.5 + rnd.uniform(0, 1.5)
+                        if x + 0.8 < W - 0.8:
+                            bm_box(bm, x, -0.38, zf + 0.2, x + 0.8, 0, zf + 0.75, 7)
+    # ---- parapet, roof room, solar water heaters
+    bm_box(bm, 0, 0, top, W, T, top + 0.9, 0)
+    bm_box(bm, 0, T, top, 0.25, depth, top + 0.9, 0)
+    bm_box(bm, W - 0.25, T, top, W, depth, top + 0.9, 0)
+    bm_box(bm, 0, depth - 0.25, top, W, depth, top + 0.9, 0)
+    bm_box(bm, -0.03, -0.05, top + 0.9, W + 0.03, T + 0.03, top + 0.98, 1)
+    rx = rnd.uniform(1.5, max(1.6, W - 5))
+    bm_box(bm, rx, depth * 0.45, top, rx + 3.2, depth * 0.45 + 3.4, top + 2.6, 0)        # stair and lift room
+    bm_box(bm, rx - 0.05, depth * 0.45 - 0.05, top + 2.6, rx + 3.25, depth * 0.45 + 3.45, top + 2.7, 1)
+    if detailed:
+        n = rnd.randint(2, max(2, min(6, int(W / 2.6))))
+        for k in range(n):
+            x = 1.2 + (W - 2.4) * (k + 0.5) / n
+            solar_heater(bm, x, rnd.uniform(3.0, 5.0), top, 8, 9, 10)
+    mesh_obj(name + '_Mesh', bm, mats, parent=root)
+    root['depth'] = depth
+    root['top'] = top
+    return root
+
+
+def tower(name, x0, side, W, D, floors, round_=False, detailed=True, seed=0):
+    """A glass office tower: a recessed glazed lobby behind stone-clad columns, a blue reflective curtain wall with
+    vertical fins and a band at each floor, and a set-back crown. Facade at |y| = 12.5, like building()."""
+    from mathutils import Matrix
+    rnd = random.Random(seed)
+    if side > 0:
+        root = empty(name, (x0, 12.5, 0), 0.0)
+    else:
+        root = empty(name, (x0 + W, -12.5, 0), math.pi)
+    LH, FH = 6.0, 3.6
+    top = LH + floors * FH
+    mats = [M['tower_glass'], M['fin'], M['glass_shop'], M['frame_d'], M['roof'], WALLS['stone_light'], M['metal']]
+    bm = bmesh.new()
+    cx, cy = W / 2, D / 2
+    if not round_:
+        bm_box(bm, 1.6, 1.6, 0, W - 1.6, D - 1.6, LH, 2)                           # lobby glass
+        bm_box(bm, 0, 0, LH - 0.6, W, D, LH, 5)                                     # transfer beam (stone)
+        nx, ny = max(2, int(W / 8)), max(2, int(D / 8))                           # stone-clad columns
+        for k in range(nx + 1):
+            x = min(max(W * k / nx - 0.45, 0), W - 0.9)
+            bm_box(bm, x, 0, 0, x + 0.9, 0.9, LH - 0.6, 5)
+            bm_box(bm, x, D - 0.9, 0, x + 0.9, D, LH - 0.6, 5)
+        for k in range(1, ny):
+            y = D * k / ny - 0.45
+            bm_box(bm, 0, y, 0, 0.9, y + 0.9, LH - 0.6, 5)
+            bm_box(bm, W - 0.9, y, 0, W, y + 0.9, LH - 0.6, 5)
+        bm_box(bm, W * 0.3, -3.5, 4.4, W * 0.7, 0, 4.7, 1)                          # entrance canopy
+        bm_box(bm, 0.15, 0.15, LH, W - 0.15, D - 0.15, top, 0)                      # curtain wall
+        for k in range(floors + 1):
+            z = LH + k * FH
+            bm_box(bm, 0, 0, z - 0.2, W, D, z + 0.25, 1)                            # floor band all round
+        pitch = 1.6 if detailed else 4.8
+        for (L_, ax) in ((W, 'x'), (D, 'y')):
+            n_ = int(L_ / pitch)
+            for k in range(1, n_):
+                t = L_ * k / n_
+                if ax == 'x':
+                    bm_box(bm, t - 0.05, -0.28, LH, t + 0.05, 0.15, top, 1)
+                    bm_box(bm, t - 0.05, D - 0.15, LH, t + 0.05, D + 0.28, top, 1)
+                else:
+                    bm_box(bm, -0.28, t - 0.05, LH, 0.15, t + 0.05, top, 1)
+                    bm_box(bm, W - 0.15, t - 0.05, LH, W + 0.28, t + 0.05, top, 1)
+        bm_box(bm, 2.5, 2.5, top, W - 2.5, D - 2.5, top + 5.0, 0)                  # crown
+        bm_box(bm, 2.3, 2.3, top + 5.0, W - 2.3, D - 2.3, top + 5.4, 1)
+        bm_box(bm, cx - 3, cy - 3, top + 5.4, cx + 3, cy + 3, top + 8.0, 6)          # plant room
+    else:
+        R = min(W, D) / 2
+        seg = 48 if detailed else 20
+        bm_cyl(bm, cx, cy, 0, LH, R - 1.6, seg, 2)
+        for k in range(seg // 3):
+            a = 2 * math.pi * k / (seg // 3)
+            bm_cyl(bm, cx + math.cos(a) * (R - 0.5), cy + math.sin(a) * (R - 0.5), 0, LH, 0.45, 10, 5)
+        bm_cyl(bm, cx, cy, LH - 0.6, LH, R, seg, 5)
+        bm_cyl(bm, cx, cy, LH, top, R - 0.1, seg, 0)
+        for k in range(floors + 1):
+            z = LH + k * FH
+            bm_cyl(bm, cx, cy, z - 0.2, z + 0.25, R + 0.05, seg, 1)
+        nf = seg if detailed else seg // 2
+        for k in range(nf):
+            a = 2 * math.pi * (k + 0.5) / nf
+            ret = bmesh.ops.create_cube(bm, size=1.0)
+            bmesh.ops.scale(bm, vec=(0.42, 0.1, top - LH), verts=ret['verts'])
+            bmesh.ops.rotate(bm, verts=ret['verts'], cent=(0, 0, 0), matrix=Matrix.Rotation(a, 3, 'Z'))
+            bmesh.ops.translate(bm, verts=ret['verts'], vec=(cx + math.cos(a) * (R + 0.05), cy + math.sin(a) * (R + 0.05), (LH + top) / 2))
+            for fc in {fc for v in ret['verts'] for fc in v.link_faces}:
+                fc.material_index = 1
+        bm_cyl(bm, cx, cy, top, top + 5, R - 2.5, seg, 0)
+        bm_cyl(bm, cx, cy, top + 5, top + 5.4, R - 2.3, seg, 1)
+    mesh_obj(name + '_Mesh', bm, mats, parent=root)
+    root['depth'] = D
+    root['top'] = top + 8.0
+    root['sign'] = []
+    return root
+
+
+def palm(name, H, seed, detailed=True):
+    """A date palm: a slightly leaning trunk with leaf-scar rings, a crown of arching fronds with leaflets, and a
+    few old dry fronds hanging down. Standing at the origin."""
+    from mathutils import Vector
+    rnd = random.Random(seed)
+    bm = bmesh.new()
+    lean, la = rnd.uniform(0.03, 0.08) * H, rnd.uniform(0, 2 * math.pi)
+
+    def axis(t):
+        b = lean * t * t
+        return Vector((b * math.cos(la), b * math.sin(la), H * t))
+    n, seg = (40, 10) if detailed else (10, 6)
+    rings = []
+    for i in range(n + 1):
+        t = i / n
+        r = 0.23 - 0.07 * t
+        if detailed and i % 2 == 0:
+            r *= 1.07                                                        # rings of old leaf bases
+        if i == 0:
+            r = 0.33
+        c = axis(t)
+        rings.append([bm.verts.new(c + Vector((r * math.cos(2 * math.pi * k / seg), r * math.sin(2 * math.pi * k / seg), 0))) for k in range(seg)])
+    for i in range(n):
+        for k in range(seg):
+            f = bm.faces.new((rings[i][k], rings[i][(k + 1) % seg], rings[i + 1][(k + 1) % seg], rings[i + 1][k]))
+            f.material_index = 0
+    top = axis(1.0)
+    ret = bmesh.ops.create_uvsphere(bm, u_segments=10 if detailed else 6, v_segments=6 if detailed else 4, radius=0.38)
+    bmesh.ops.scale(bm, vec=(1, 1, 1.4), verts=ret['verts'])
+    bmesh.ops.translate(bm, verts=ret['verts'], vec=top + Vector((0, 0, 0.1)))
+    for f in {f for v in ret['verts'] for f in v.link_faces}:
+        f.material_index = 2
+    nf = 18 if detailed else 10
+    for i in range(nf):
+        az = 2 * math.pi * i / nf + rnd.uniform(-0.15, 0.15)
+        dry = detailed and i % 6 == 0
+        el0 = rnd.uniform(-1.1, -0.6) if dry else rnd.uniform(0.15, 0.95)
+        L = rnd.uniform(3.0, 3.9) * (H / 11) ** 0.3
+        droop = rnd.uniform(0.9, 1.6)
+        mi = 2 if dry else 1
+        npts = 10 if detailed else 5
+        d_az, side = Vector((math.cos(az), math.sin(az), 0)), Vector((-math.sin(az), math.cos(az), 0))
+        pts, p = [], top + Vector((0, 0, 0.25))
+        for j in range(npts + 1):
+            s = j / npts
+            el = el0 - droop * s * s
+            pts.append(p.copy())
+            p = p + (d_az * math.cos(el) + Vector((0, 0, math.sin(el)))) * (L / npts)
+        for j in range(npts):
+            a, b = pts[j], pts[j + 1]
+            w = 0.045 * (1 - j / npts) + 0.012
+            vs = [bm.verts.new(a - side * w), bm.verts.new(a + side * w), bm.verts.new(b + side * w * 0.8), bm.verts.new(b - side * w * 0.8)]
+            f = bm.faces.new(vs)
+            f.material_index = mi
+            tan = (b - a).normalized()
+            nl = 3 if detailed else 1
+            for q in range(nl):
+                s = (j + (q + 0.5) / nl) / npts
+                base = a.lerp(b, (q + 0.5) / nl)
+                ll = (0.22 + 0.7 * math.sin(math.pi * min(1.0, s * 1.1))) * (L / 3.5)
+                for sg in (1, -1):
+                    out = (side * sg * 0.85 + Vector((0, 0, -0.5)) + tan * 0.4).normalized()
+                    tip = base + out * ll
+                    wv = tan * 0.05
+                    f = bm.faces.new((bm.verts.new(base - wv), bm.verts.new(base + wv), bm.verts.new(tip)))
+                    f.material_index = mi
+    ob = mesh_obj(name, bm, [M['palm_trunk'], M['palm_leaf'], M['palm_dry']])
+    return ob
+
+
+def leafy_tree(name, H, seed, detailed=True):
+    """A broad street tree: a forked trunk and a rounded crown of leaf cards (each a 0..1 UV square that the game
+    textures with a cluster of leaves)."""
+    from mathutils import Vector, Matrix
+    rnd = random.Random(seed)
+    bm = bmesh.new()
+    uv = bm.loops.layers.uv.new('UVMap')
+    seg = 8 if detailed else 5
+    trunk_h = 0.42 * H
+    for (p0, p1, r0, r1) in [((0, 0, 0), (0.1, 0.05, trunk_h), 0.17, 0.12),
+                             ((0.1, 0.05, trunk_h * 0.85), (0.9, 0.4, trunk_h * 1.5), 0.1, 0.05),
+                             ((0.1, 0.05, trunk_h * 0.8), (-0.7, -0.6, trunk_h * 1.45), 0.09, 0.05),
+                             ((0.1, 0.05, trunk_h), (0.0, 0.5, trunk_h * 1.6), 0.08, 0.04)]:
+        a, b = Vector(p0), Vector(p1)
+        d = (b - a).normalized()
+        q = d.to_track_quat('Z', 'Y')
+        ra = [bm.verts.new(a + q @ Vector((r0 * math.cos(2 * math.pi * k / seg), r0 * math.sin(2 * math.pi * k / seg), 0))) for k in range(seg)]
+        rb = [bm.verts.new(b + q @ Vector((r1 * math.cos(2 * math.pi * k / seg), r1 * math.sin(2 * math.pi * k / seg), 0))) for k in range(seg)]
+        for k in range(seg):
+            f = bm.faces.new((ra[k], ra[(k + 1) % seg], rb[(k + 1) % seg], rb[k]))
+            f.material_index = 0
+    c = Vector((0, 0, 0.66 * H))
+    rad = Vector((0.33 * H, 0.33 * H, 0.26 * H))
+    ncard, size = (170, 0.95 * H / 6) if detailed else (46, 1.7 * H / 6)
+    for i in range(ncard):
+        while True:
+            v = Vector((rnd.uniform(-1, 1), rnd.uniform(-1, 1), rnd.uniform(-1, 1)))
+            if 0.35 < v.length <= 1:
+                break
+        p = c + Vector((v.x * rad.x, v.y * rad.y, v.z * rad.z))
+        nrm = (v.normalized() + Vector((rnd.uniform(-0.6, 0.6), rnd.uniform(-0.6, 0.6), rnd.uniform(-0.3, 0.6)))).normalized()
+        q = nrm.to_track_quat('Z', 'Y') @ __import__('mathutils').Quaternion((0, 0, 1), rnd.uniform(0, 2 * math.pi))
+        s = size * rnd.uniform(0.8, 1.2)
+        vs = [bm.verts.new(p + q @ Vector((x * s / 2, y * s / 2, 0))) for (x, y) in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+        f = bm.faces.new(vs)
+        f.material_index = 1
+        for loop, (u, w) in zip(f.loops, ((0, 0), (1, 0), (1, 1), (0, 1))):
+            loop[uv].uv = (u, w)
+    return mesh_obj(name, bm, [M['bark'], M['leaves']])
+
+
+def bench(name):
+    """A park bench: wooden slats on two dark cast-iron frames, 1.8 m long, facing -y."""
+    bm = bmesh.new()
+    for k in range(4):                                                     # seat slats
+        y = 0.02 + k * 0.12
+        bm_box(bm, -0.9, y, 0.42, 0.9, y + 0.09, 0.46, 0)
+    for k in range(3):                                                     # back slats, leaning back
+        z = 0.56 + k * 0.13
+        y = 0.5 + (z - 0.5) * 0.25
+        bm_box(bm, -0.9, y, z, 0.9, y + 0.035, z + 0.09, 0)
+    for x in (-0.75, 0.75):
+        bm_box(bm, x - 0.03, 0.04, 0, x + 0.03, 0.1, 0.44, 1)
+        bm_box(bm, x - 0.03, 0.42, 0, x + 0.03, 0.48, 0.44, 1)
+        bm_box(bm, x - 0.03, 0.04, 0.4, x + 0.03, 0.5, 0.44, 1)
+        bm_box(bm, x - 0.03, 0.47, 0.44, x + 0.03, 0.53, 0.92, 1)
+        bm_box(bm, x - 0.03, 0.0, 0.62, x + 0.03, 0.12, 0.66, 1)           # armrest
+        bm_box(bm, x - 0.03, 0.05, 0.44, x + 0.03, 0.09, 0.64, 1)
+    return mesh_obj(name, bm, [M['bench_wood'], M['lamp_pole']], bevel=0.0)
 
 
 # ---------------------------------------------------------------- cars
@@ -2209,7 +2622,7 @@ def world(sun_elev_deg, sun_az_deg, strength=1.0):
 # ---------------------------------------------------------------- build the city
 def build():
     street()
-    styles = list(WALLS.keys())
+    styles = list(NYC_STYLES)
     for side in (1, -1):
         x = -70.0
         i = 0
