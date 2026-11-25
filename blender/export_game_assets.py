@@ -401,7 +401,7 @@ for i, (female, style, sleeves, seed) in enumerate(VARIANTS):
         me = baked(o)
         bones = skin_bones(o)
         if 'Shirt' in nm:
-            core(me, J['waist'].z, J['chest'].z + 0.04, 'core_top')
+            core(me, J['waist'].z, J['chest'].z + 0.04, 'core_top', shrink=0.72)   # slim: the chest narrows under the arms
             # the shoulder balls must stay inside the shirt: 90% of the distance from the joint to its surface
             cores['shoulder_r'] = round(0.9 * min((v.co - J['shL']).length for v in me.vertices), 4)
         if 'Trousers' in nm:
