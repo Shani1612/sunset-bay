@@ -1732,7 +1732,7 @@ def add_hand(V, R, E, wi, el, wr, sgn, k, grip):
         prev = len(V) - 1
 
 
-def human_pose(h, female, walk, phase, phone, rnd):
+def human_pose(h, female, walk, phase, phone, rnd, neutral=False):
     """Joint positions for a standing or walking person facing +x (left side +y), feet on the ground."""
     k = h / 1.78
     hipw = (0.105 if female else 0.095) * k
@@ -1744,15 +1744,15 @@ def human_pose(h, female, walk, phase, phone, rnd):
     for side, sgn in (('L', 1), ('R', -1)):
         th = A * math.sin(phase) * sgn                      # leg swing: + forward
         if not walk:
-            th = math.radians(rnd.uniform(-3, 3)) + sgn * 0.0
+            th = 0.0 if neutral else math.radians(rnd.uniform(-3, 3))
         back = max(0.0, -th) / (A if A else 1.0)
         bend = math.radians(5 + 13 * back)                  # trailing knee bends a little; heel lifts ~8 cm
         hip = Vector((0, sgn * hipw, 0.92 * k))
         knee = hip + Vector((math.sin(th), sgn * 0.01, -math.cos(th))) * (0.43 * k)
         ank = knee + Vector((math.sin(th - bend), 0, -math.cos(th - bend))) * (0.42 * k)
         J['hip' + side], J['knee' + side], J['ank' + side] = hip, knee, ank
-        al = -0.9 * th if walk else math.radians(rnd.uniform(2, 6))      # arms swing against the legs
-        el = math.radians(14 + (12 if al > 0 else 4))
+        al = -0.9 * th if walk else math.radians(3 if neutral else rnd.uniform(2, 6))   # arms swing against the legs
+        el = math.radians(10 if neutral else 14 + (12 if al > 0 else 4))
         if phone and side == 'R':
             al, el = math.radians(12), math.radians(105)               # forearm up, looking at a phone
         sh = Vector((0, sgn * shw, 1.43 * k))
@@ -1984,16 +1984,18 @@ def head(name, root, J, k, female, skin, hair_col, lip_col, eye_mat, white_mat, 
         mesh_obj(name + 'Bun', bb, [hair_col], parent=root, smooth=True)
 
 
-def person(name, loc, yaw, seed, walk=None, phone=None):
+def person(name, loc, yaw, seed, walk=None, phone=None, female=None, style=None, sleeves=None, neutral=False):
     """A pedestrian standing on the ground at loc, facing yaw (radians, 0 = +x)."""
     rnd = random.Random(seed)
-    female = rnd.random() < 0.5
+    female = rnd.random() < 0.5 if female is None else female
     h = rnd.uniform(1.62, 1.74) if female else rnd.uniform(1.7, 1.88)
     k = h / 1.78
     g = rnd.uniform(0.92, 1.15)                                  # build
     walk = rnd.random() < 0.6 if walk is None else walk
     phone = (not walk and rnd.random() < 0.35) if phone is None else phone
-    J = human_pose(h, female, walk, rnd.uniform(0, 2 * math.pi), phone, rnd)
+    if neutral:
+        walk, phone = False, False
+    J = human_pose(h, female, walk, rnd.uniform(0, 2 * math.pi), phone, rnd, neutral)
     root = empty(name, loc, yaw)
     S = name + '_'
     skin = principled(S + 'Skin', srgb(rnd.choice(SKIN_TONES)), rough=0.5, spec=0.4)
@@ -2017,8 +2019,8 @@ def person(name, loc, yaw, seed, walk=None, phone=None):
         pants = principled(S + 'Trousers', srgb(pc), rough=0.8, spec=0.3)
     shoe_mat = principled(S + 'Shoe', srgb(rnd.choice(SHOE_COLS)), rough=0.5, spec=0.4)
     sole_mat = principled(S + 'Sole', srgb('#e8e6e0' if rnd.random() < 0.5 else '#1b1b1c'), rough=0.7)
-    long_sleeves = rnd.random() < 0.45
-    style = rnd.choice(['short', 'short', 'bald'] if not female else ['long', 'long', 'bun', 'short'])
+    long_sleeves = (rnd.random() < 0.45) if sleeves is None else sleeves
+    style = rnd.choice(['short', 'short', 'bald'] if not female else ['long', 'long', 'bun', 'short']) if style is None else style
 
     def grow(r, f=1.12, a=0.008):
         return (r[0] * f + a, r[1] * f + a) if isinstance(r, tuple) else r * f + a
@@ -2087,6 +2089,9 @@ def person(name, loc, yaw, seed, walk=None, phone=None):
     # ---- shoes, head and hair, phone
     for sd in ('L', 'R'):
         shoe(S + 'Shoe' + sd, root, J['ank' + sd], shoe_mat, sole_mat, k)
+    root['J'] = {key: list(v) for key, v in J.items()}                # joints, for the game export
+    root['torso_half'] = ((0.15 if female else 0.168) * g * k + 0.006)
+    root['k'] = k
     head(S, root, J, k, female, skin, hair_col, lip_col, eye_mat, white_mat, style,
          math.radians(rnd.uniform(-12, 12)), math.radians(16 if phone else rnd.uniform(-4, 4)))
     if phone:
@@ -2341,4 +2346,5 @@ def main():
         bpy.ops.render.render(write_still=True)
 
 
-main()
+if __name__ == '__main__':
+    main()
