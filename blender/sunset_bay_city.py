@@ -650,7 +650,7 @@ def gh_point(x, v):
         t = max(0.0, min(1.0, (g['xf1'] - x) / (g['xf1'] - g['xr1'])))
         roof = g['roof'] + (g['roof_rear'] - g['roof']) * t ** 1.4
     h = max(0.012, (roof - zb) * gh_top(x))
-    w = lerp(g['wb'], g['wt'], pz)
+    w = lerp(g['wb'], g['wt'], pz) * (1.0 - g.get('end_taper', 0.0) * (1.0 - gh_top(x)))
     return Vector((x, py * w, zb + pz * h))
 
 
@@ -715,6 +715,43 @@ def soft(name, bm, mats, root, width=0.03, seg=4):
     return ob
 
 
+def gh_normal(x, v):
+    """Outward surface normal of the glasshouse at (x, v), and the tangent along x."""
+    e = 1e-3
+    du = gh_point(min(x + e, GH['xf0'] - 1e-4), v) - gh_point(max(x - e, GH['xr0'] + 1e-4), v)
+    dv = gh_point(x, min(v + e, 1)) - gh_point(x, max(v - e, 0))
+    n = du.cross(dv)
+    if n.length < 1e-9:
+        return Vector((0, 0, 1)), du.normalized()
+    n.normalize()
+    p = gh_point(x, v)
+    if n.dot(Vector((0, p.y, p.z - gh_zb(x) + 0.3))) < 0:
+        n = -n
+    return n, du.normalized()
+
+
+def wipers(name, root, mat, blades):
+    """Wiper blades parked on the glass: each one follows the glass surface along (x, v0..v1)."""
+    bm = bmesh.new()
+    for (x, v0, v1) in blades:
+        rings = []
+        for i in range(17):
+            v = lerp(v0, v1, i / 16)
+            p = gh_point(x, v)
+            n, t = gh_normal(x, v)
+            rings.append([tuple(p + n * a + t * b) for (a, b) in ((0.004, -0.01), (0.004, 0.01), (0.018, 0.008), (0.018, -0.008))])
+        vr = [[bm.verts.new(q) for q in r] for r in rings]
+        for k in range(len(vr) - 1):
+            for j in range(4):
+                bm.faces.new((vr[k][j], vr[k][(j + 1) % 4], vr[k + 1][(j + 1) % 4], vr[k + 1][j]))
+        bm.faces.new(list(reversed(vr[0])))
+        bm.faces.new(vr[-1])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    if mat is None:                                   # matte black rubber: no shiny line in low sun
+        mat = principled(name + '_Rubber', srgb('#0a0a0b'), rough=0.85, spec=0.2)
+    return mesh_obj(name, bm, [mat], parent=root)
+
+
 def gh_surface(name, mat, root, x0, x1, v0, v1, nx, nv, offset=0.0):
     """A patch of the greenhouse surface (offset outward), used for the cabin shell and its glass."""
     bm = bmesh.new()
@@ -774,7 +811,7 @@ def gh_shell(name, mats, root, holes, nx=160, nv=40, mx=0.03, mv=0.015, black_x=
             f = bm.faces.new((grid[i][j], grid[i + 1][j], grid[i + 1][j + 1], grid[i][j + 1]))
             if any(h[0] - mx < xc < h[1] + mx and h[2] - mv < vc < h[3] + mv for h in holes):
                 f.material_index = 1
-            elif (vc < 0.26 or vc > 0.74) and any(a < xc < b for (a, b) in black_x):
+            elif (vc < 0.205 or vc > 0.795) and any(a < xc < b for (a, b) in black_x):
                 f.material_index = 1                                  # blacked-out pillar
     bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context='VERTS')
     bm.normal_update()
@@ -1016,12 +1053,8 @@ def car(name, color, loc, rot_z):
     bmesh.ops.rotate(swb, verts=swb.verts, cent=(0, 0, 0), matrix=Matrix.Rotation(math.radians(-22), 3, 'Y'))
     bmesh.ops.translate(swb, verts=swb.verts, vec=(0.24, 0.38, 1.0))
     mesh_obj(name + '_SteeringWheel', swb, [dash, smooth_chrome], parent=root, smooth=True)
-    # wipers at the base of the windscreen
-    wb = bmesh.new()
-    for yy in (-0.05, 0.42):
-        p = gh_point(g['xf0'] - 0.1, 0.5)
-        bm_box(wb, p.x - 0.02, yy - 0.42, p.z + 0.005, p.x + 0.0, yy, p.z + 0.02, 0)
-    mesh_obj(name + '_Wipers', wb, [mats['dark']], parent=root)
+    # wipers parked on the glass at the base of the windscreen
+    wipers(name + '_Wipers', root, None, [(g['xf0'] - 0.12, 0.28, 0.56), (g['xf0'] - 0.12, 0.5, 0.74)])
 
     # ---- parts projected onto the real body surface
     S = name + '_'
@@ -1144,7 +1177,7 @@ def car(name, color, loc, rot_z):
 # ---------------------------------------------------------------- Hyundai i20 Active (2015-2020)
 # Built to the published size: length 4.0 m, width 1.76 m, height 1.555 m, wheelbase 2.57 m, ground
 # clearance 0.19 m, 195/55 R16 tyres. The front of the car is +x and its left side is +y.
-I20_GH = dict(xr0=-1.95, xr1=-1.62, xf1=0.12, xf0=0.97, zb=0.88, zb_rear=0.98, roof=1.5, roof_rear=1.37, wb=0.78, wt=0.63)
+I20_GH = dict(xr0=-1.95, xr1=-1.62, xf1=0.12, xf0=0.97, zb=0.88, zb_rear=0.98, roof=1.5, roof_rear=1.37, wb=0.78, wt=0.63, end_taper=0.1)
 I20_TOP = [(-2.0, 1.02), (-1.93, 1.1), (-1.7, 1.13), (-1.2, 1.115), (-0.4, 1.07), (0.5, 1.03), (0.97, 1.0),
            (1.35, 0.95), (1.7, 0.91), (1.92, 0.88), (2.0, 0.83)]                # top of the body (side view)
 I20_BOT = [(-2.0, 0.48), (-1.88, 0.4), (-1.7, 0.37), (1.55, 0.37), (1.82, 0.37), (2.0, 0.38)]
@@ -1226,7 +1259,7 @@ def car_i20(name, color, loc, rot_z):
     tail_dark = principled(S + 'TailDark', srgb('#3a0604'), rough=0.2, spec=0.8)
     seal = principled(S + 'WindowSeal', srgb('#0b0b0c'), rough=0.25)
     shell_mat = two_sided_paint(S + 'CabinPaint', color, '#bdb8b0')
-    cladding = textured(S + 'Cladding', 'plaster', srgb('#1a1a1b'), srgb('#232325'), rough=0.75, bump=0.5)
+    cladding = textured(S + 'Cladding', 'plaster', srgb('#141416'), srgb('#19191b'), rough=0.62, bump=0.12, rough_var=0.05)
     skid = principled(S + 'SkidPlate', srgb('#b4b8bd'), rough=0.32, metal=0.9)
     rail = principled(S + 'RoofRail', srgb('#a2a7ad'), rough=0.3, metal=0.9)
     grille_mat = principled(S + 'Grille', srgb('#0b0b0c'), rough=0.2, metal=0.4)
@@ -1291,24 +1324,31 @@ def car_i20(name, color, loc, rot_z):
     gh_shell(S + 'Cabin', [shell_mat, seal], root, [w[:4] for w in windows], black_x=[(-0.26, -0.12), (-1.12, -1.02)])
     for k, (x0, x1, v0, v1, gm) in enumerate(windows):
         thin(gh_surface(S + 'Window%d' % k, gm, root, x0, x1, v0, v1, 140, 20), 0.005)
-    rb = bmesh.new()
-    for v in (0.29, 0.71):                                            # roof rails on three feet
-        xs = [lerp(-1.48, -0.02, i / 24) for i in range(25)]
-        pts = [gh_point(x, v) for x in xs]
-        for a, b in zip(pts[:-1], pts[1:]):
-            bm_hex(rb, [(a.x, a.y - 0.016, a.z + 0.03), (b.x, b.y - 0.016, b.z + 0.03), (b.x, b.y + 0.016, b.z + 0.03), (a.x, a.y + 0.016, a.z + 0.03),
-                        (a.x, a.y - 0.016, a.z + 0.06), (b.x, b.y - 0.016, b.z + 0.06), (b.x, b.y + 0.016, b.z + 0.06), (a.x, a.y + 0.016, a.z + 0.06)], 0)
-        for i in (0, 12, 24):
-            p = pts[i]
-            bm_box(rb, p.x - 0.04, p.y - 0.018, p.z - 0.01, p.x + 0.04, p.y + 0.018, p.z + 0.035, 0)
-    mesh_obj(S + 'RoofRails', rb, [rail], parent=root, bevel=0.006)
+    fb = bmesh.new()
+    for v in (0.29, 0.71):                                            # roof rails: one smooth tube each
+        n_ = 30
+        xs = [lerp(-1.5, 0.0, i / n_) for i in range(n_ + 1)]
+        rings = []
+        for i, x in enumerate(xs):
+            p = gh_point(x, v)
+            k = min(1.0, i / 3, (n_ - i) / 3)                            # ends taper down onto the roof
+            hy, hz = 0.017 * (0.6 + 0.4 * k), 0.016 * (0.6 + 0.4 * k)
+            cz = p.z + 0.012 + 0.034 * k
+            ring = []
+            for j in range(10):
+                a = j / 10 * 2 * math.pi
+                c_, s_ = math.cos(a), math.sin(a)
+                ring.append((x, p.y + hy * math.copysign(abs(c_) ** 0.5, c_), cz + hz * math.copysign(abs(s_) ** 0.5, s_)))
+            rings.append(ring)
+        ro = mesh_obj(S + 'RoofRail', loft(rings), [rail], parent=root)
+        subsurf(ro, 1)
+        for i in (6, 15, 24):                                         # feet
+            p = gh_point(xs[i], v)
+            bm_box(fb, p.x - 0.035, p.y - 0.015, p.z - 0.01, p.x + 0.035, p.y + 0.015, p.z + 0.04, 0)
+    mesh_obj(S + 'RailFeet', fb, [mats['dark']], parent=root, bevel=0.008)
     thin(gh_surface(S + 'Spoiler', paint, root, g['xr1'] - 0.02, g['xr1'] + 0.16, 0.2, 0.8, 24, 20, 0.022), 0.02)
-    p = gh_point(g['xr0'] + 0.1, 0.5)
-    wb_ = bmesh.new()
-    bm_box(wb_, p.x - 0.01, -0.02, p.z + 0.006, p.x + 0.01, 0.24, p.z + 0.018, 0)   # rear wiper
-    bm_box(wb_, g['xf0'] - 0.12, -0.5, gh_point(g['xf0'] - 0.1, 0.5).z + 0.006, g['xf0'] - 0.1, -0.02, gh_point(g['xf0'] - 0.1, 0.5).z + 0.02, 0)
-    bm_box(wb_, g['xf0'] - 0.12, 0.0, gh_point(g['xf0'] - 0.1, 0.5).z + 0.006, g['xf0'] - 0.1, 0.46, gh_point(g['xf0'] - 0.1, 0.5).z + 0.02, 0)
-    mesh_obj(S + 'Wipers', wb_, [mats['dark']], parent=root)
+    wipers(S + 'Wipers', root, None, [(g['xf0'] - 0.13, 0.28, 0.56), (g['xf0'] - 0.13, 0.5, 0.74),   # windscreen
+                                                (g['xr0'] + 0.12, 0.42, 0.64)])                                 # tailgate glass
 
     # ---- interior: seats, rear bench, dashboard, console, steering wheel, parcel shelf
     for sy in (0.38, -0.38):
@@ -1396,7 +1436,7 @@ def car_i20(name, color, loc, rot_z):
             decal(S + 'Seam', body, seam, root, lambda u, v, s=s, xs_=xs_: (xs_ - 0.004 + u * 0.008, s * 3.0, 0.5 + v * 0.52), (0, -s, 0), 1, 30, 0.002)
         for hx in (0.32, -0.6):
             decal(S + 'Handle', body, mats['chrome'], root, lambda u, v, s=s, hx=hx: (hx - 0.09 + u * 0.18, s * 3.0, 0.93 + v * 0.03), (0, -s, 0), 6, 2, 0.008)
-        decal(S + 'Seam', body, seam, root, lambda u, v, s=s: (0.98 + u * 0.95, s * (0.7 + v * 0.008), 3.0), (0, 0, -1), 30, 1, 0.002)   # hood sides
+        decal(S + 'Seam', body, seam, root, lambda u, v, s=s: (0.98 + u * 0.6, s * (0.66 + v * 0.008), 3.0), (0, 0, -1), 24, 1, 0.002)   # hood sides
         decal(S + 'Seam', body, seam, root, lambda u, v, s=s: (-4.0, s * (0.375 + u * 0.008), 0.62 + v * 0.42), (1, 0, 0), 1, 24, 0.002)  # tailgate sides
     decal(S + 'Seam', body, seam, root, lambda u, v: (0.98 + v * 0.008, -0.7 + u * 1.4, 3.0), (0, 0, -1), 30, 1, 0.002)        # hood rear edge
     decal(S + 'Seam', body, seam, root, lambda u, v: (-4.0, -0.375 + u * 0.75, 0.62 + v * 0.008), (1, 0, 0), 30, 1, 0.002)      # tailgate bottom
@@ -1435,7 +1475,7 @@ def car_i20(name, color, loc, rot_z):
             return (-1.0 + 0.7 * w, -s * 0.75 * w, -0.1 - 0.5 * w)
 
         def head_pt(u, v, grow=0.0, s=s):
-            u = -grow + u * (1 + 2 * grow)
+            u = -grow * 0.3 + u * (1 + 0.6 * grow)
             v = -grow * 2 + v * (1 + 4 * grow)
             uu = min(1.0, max(0.0, u))
             h = 0.04 + 0.09 * math.sin(math.pi * min(1.0, uu * 1.05)) ** 0.6
@@ -1482,7 +1522,7 @@ def car_i20(name, color, loc, rot_z):
             return (1.0 - w, -s * (0.2 + 0.8 * w), 0.0)
 
         def tail_pt(u, v, grow=0.0, s=s):
-            u = -grow + u * (1 + 2 * grow)
+            u = -grow * 0.3 + u * (1 + 0.6 * grow)
             v = -grow * 2 + v * (1 + 4 * grow)
             uu = min(1.0, max(0.0, u))
             w = max(0.0, (uu - 0.55) / 0.45)
