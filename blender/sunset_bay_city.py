@@ -1684,6 +1684,54 @@ def band(name, root, centre, axis, R, r, mat, n=40, m=10):
     return mesh_obj(name, bm, [mat], parent=root, smooth=True)
 
 
+def add_hand(V, R, E, wi, el, wr, sgn, k, grip):
+    """Append a hand skeleton to (V, R, E), starting at wrist vertex index wi.
+    Palm faces the thigh (or up, holding a phone); the index finger and thumb are on the front side."""
+    a = (wr - el).normalized()                                   # along the hand
+    n0 = Vector((0, 0, 1)) if grip else Vector((0, -sgn, 0))     # palm normal
+    n = (n0 - a * n0.dot(a)).normalized()
+    b = a.cross(n).normalized()                                  # across the knuckles
+    if grip:
+        if b.y * (-sgn) < 0:
+            b = -b                                               # thumb toward the body when holding a phone
+    elif b.x < 0:
+        b = -b                                                   # thumb forward when the arm hangs
+    curl = (0.6, 0.7, 0.55) if grip else (0.2, 0.3, 0.22)        # bend at each finger joint (radians)
+    P = wr + a * 0.045 * k
+    pi_ = len(V)
+    V.append(P)
+    R.append(0.028 * k)
+    E.append((wi, pi_))
+    fingers = [(0.027, (0.04, 0.025, 0.02)), (0.009, (0.045, 0.028, 0.021)), (-0.009, (0.043, 0.027, 0.02)), (-0.026, (0.033, 0.021, 0.018))]
+    for off, segs in fingers:
+        q = wr + a * 0.088 * k + b * off * k
+        prev = len(V)
+        V.append(q)
+        R.append(0.0095 * k)
+        E.append((pi_, prev))
+        ang = 0.0
+        for j, L in enumerate(segs):
+            ang += curl[j]
+            q = q + (a * math.cos(ang) + n * math.sin(ang)) * L * k
+            V.append(q)
+            R.append((0.0085 - 0.0011 * j) * k)
+            E.append((prev, len(V) - 1))
+            prev = len(V) - 1
+    t = wr + a * 0.03 * k + b * 0.02 * k + n * 0.01 * k          # thumb, along the index side of the palm
+    prev = len(V)
+    V.append(t)
+    R.append(0.012 * k)
+    E.append((wi, prev))
+    td = (a * 0.8 + b * 0.35 + n * (0.5 if grip else 0.32)).normalized()
+    for j, L in enumerate((0.03, 0.024, 0.02)):
+        td = (td + n * (0.2 if grip else 0.08) + a * 0.1).normalized()
+        t = t + td * L * k
+        V.append(t)
+        R.append((0.0105 - 0.0012 * j) * k)
+        E.append((prev, len(V) - 1))
+        prev = len(V) - 1
+
+
 def human_pose(h, female, walk, phase, phone, rnd):
     """Joint positions for a standing or walking person facing +x (left side +y), feet on the ground."""
     k = h / 1.78
@@ -1736,7 +1784,7 @@ def shoe(name, root, ank, mat, sole_mat, k):
     for i in range(9):
         t = i / 8
         w = 0.05 * k * (0.75 + 0.25 * math.sin(math.pi * min(1.0, t * 1.15)))
-        hgt = 0.085 * k * (1 - 0.55 * t ** 1.5) if t > 0.25 else 0.085 * k
+        hgt = 0.095 * k * (1 - 0.6 * t ** 1.5) if t > 0.25 else 0.095 * k
         c = heel + fwd * (L * (t * 1.08 - 0.04))
         ring = []
         for j in range(12):
@@ -1748,18 +1796,20 @@ def shoe(name, root, ank, mat, sole_mat, k):
         rings.append(ring)
     so = mesh_obj(name, loft(rings), [mat], parent=root)
     subsurf(so, 1)
-    sbm = bmesh.new()                                           # sole
-    for i in range(8):
-        t0, t1 = i / 8, (i + 1) / 8
-        a_ = heel + fwd * (L * (t0 * 1.08 - 0.04))
-        b_ = heel + fwd * (L * (t1 * 1.08 - 0.04))
-        w0 = 0.052 * k * (0.75 + 0.25 * math.sin(math.pi * min(1.0, t0 * 1.15)))
-        w1 = 0.052 * k * (0.75 + 0.25 * math.sin(math.pi * min(1.0, t1 * 1.15)))
-        q = [a_ - side * w0 - up * 0.014, b_ - side * w1 - up * 0.014, b_ + side * w1 - up * 0.014, a_ + side * w0 - up * 0.014,
-             a_ - side * w0 + up * 0.004, b_ - side * w1 + up * 0.004, b_ + side * w1 + up * 0.004, a_ + side * w0 + up * 0.004]
-        bm_hex(sbm, [tuple(v) for v in q], 0)
-    bmesh.ops.recalc_face_normals(sbm, faces=sbm.faces)
-    mesh_obj(name + 'Sole', sbm, [sole_mat], parent=root, bevel=0.004)
+    srings = []                                                 # sole: one continuous rubber piece
+    for i in range(9):
+        t = i / 8
+        c = heel + fwd * (L * (t * 1.08 - 0.04))
+        w = 0.053 * k * (0.75 + 0.25 * math.sin(math.pi * min(1.0, t * 1.15)))
+        ring = []
+        for j in range(12):
+            a_ = j / 12 * 2 * math.pi
+            ca, sa = math.cos(a_), math.sin(a_)
+            ring.append(tuple(c + side * (w * math.copysign(abs(ca) ** 0.35, ca)) + up * (0.009 * math.copysign(abs(sa) ** 0.35, sa) - 0.005)))
+        srings.append(ring)
+    sbm = loft(srings)
+    smo = mesh_obj(name + 'Sole', sbm, [sole_mat], parent=root)
+    subsurf(smo, 1)
 
 
 def head(name, root, J, k, female, skin, hair_col, lip_col, eye_mat, white_mat, style, yaw, pitch):
@@ -1828,7 +1878,7 @@ def head(name, root, J, k, female, skin, hair_col, lip_col, eye_mat, white_mat, 
         ex = surf_x(sgn * 0.032, 0.035)
         ell(eb, (ex - 0.005, sgn * 0.032, 0.035), (0.0115, 0.0135, 0.0092), 0)       # eyeball, just out of the socket
         ell(eb, (ex + 0.0062, sgn * 0.032, 0.0345), (0.0016, 0.0056, 0.0056), 1)     # iris and pupil
-        ell(eb, (ex - 0.0025, sgn * 0.032, 0.0408), (0.0112, 0.0152, 0.0058), 3)     # upper eyelid
+        ell(eb, (ex - 0.0028, sgn * 0.032, 0.0405), (0.011, 0.0148, 0.0048), 3)     # upper eyelid
         bx = surf_x(sgn * 0.034, 0.055)
         ell(eb, (bx + 0.0005, sgn * 0.034, 0.0545), (0.003, 0.019, 0.0024), 2)       # eyebrow
         ell(eb, (0.0, sgn * 0.077, 0.008), (0.014, 0.0055, 0.026), 3)               # ear
@@ -1911,7 +1961,7 @@ def person(name, loc, yaw, seed, walk=None, phone=None):
     top = principled(S + 'Top', srgb(rnd.choice(TOP_COLS)), rough=0.85, spec=0.3)
     kind, pc = rnd.choice(PANTS)
     if kind == 'jeans':
-        pants = textured(S + 'Jeans', 'plaster', srgb(pc), tuple(min(1, c * 1.35) for c in srgb(pc)), rough=0.85, bump=0.2)
+        pants = textured(S + 'Jeans', 'plaster', srgb(pc), tuple(min(1, c * 1.25) for c in srgb(pc)), rough=0.85, bump=0.04, rough_var=0.04)
     else:
         pants = principled(S + 'Trousers', srgb(pc), rough=0.8, spec=0.3)
     shoe_mat = principled(S + 'Shoe', srgb(rnd.choice(SHOE_COLS)), rough=0.5, spec=0.4)
@@ -1933,20 +1983,29 @@ def person(name, loc, yaw, seed, walk=None, phone=None):
         sh, el, wr = J['sh' + sd], J['el' + sd], J['wr' + sd]
         b0 = len(V)
         roots.append(b0)
+        sgn = 1 if sd == 'L' else -1
         if long_sleeves:
-            V += [wr - (wr - el) * 0.3, wr, J['hand' + sd], J['thumb' + sd]]
-            R += [0.034 * k, 0.032 * k, (0.043 * k, 0.016 * k), 0.013 * k]
-            E += [(b0, b0 + 1), (b0 + 1, b0 + 2), (b0 + 1, b0 + 3)]
+            V += [wr - (wr - el) * 0.3, wr]
+            R += [0.034 * k, 0.03 * k]
+            E += [(b0, b0 + 1)]
+            wi = b0 + 1
         else:
-            V += [sh + (el - sh) * 0.35, el, wr, J['hand' + sd], J['thumb' + sd]]
-            R += [0.05 * g * k, 0.045 * g * k, 0.032 * k, (0.043 * k, 0.016 * k), 0.013 * k]
-            E += [(b0, b0 + 1), (b0 + 1, b0 + 2), (b0 + 2, b0 + 3), (b0 + 2, b0 + 4)]
+            V += [sh + (el - sh) * 0.35, el, el + (wr - el) * 0.35, wr]
+            R += [0.05 * g * k, 0.043 * g * k, 0.041 * g * k, 0.03 * k]          # forearm muscle, then the wrist
+            E += [(b0, b0 + 1), (b0 + 1, b0 + 2), (b0 + 2, b0 + 3)]
+            wi = b0 + 3
+        add_hand(V, R, E, wi, el, wr, sgn, k, phone and sd == 'R')
     skin_obj(S + 'Body', root, V, E, R, skin, roots=roots)
 
     # ---- shirt / T-shirt: it gives the torso its shape
     sV = [J['pelvis'] + Vector((0, 0, 0.005)), J['waist'], J['chest'], J['neck'] + Vector((0, 0, -0.045 * k))]
     sR = [grow(torso[0], 1.02, 0.004), grow(torso[1], 1.0, 0.006), grow(torso[2], 1.0, 0.006), 0.075 * k]
     sE = [(0, 1), (1, 2), (2, 3)]
+    if female:
+        for sy in (0.048, -0.048):
+            sV.append(J['chest'] + Vector((0.06, sy, -0.04)) * k)
+            sR.append(0.05 * g * k)
+            sE.append((2, len(sV) - 1))
     hems = []
     for sd in ('L', 'R'):
         b0 = len(sV)
@@ -1954,13 +2013,13 @@ def person(name, loc, yaw, seed, walk=None, phone=None):
         if long_sleeves:
             end = wr - (wr - el) * 0.15
             sV += [J['clav' + sd], sh, el, end]
-            sR += [0.068 * g * k, 0.06 * g * k, 0.048 * g * k, 0.04 * k]
+            sR += [0.07 * g * k, (0.06 if female else 0.066) * g * k, 0.048 * g * k, 0.04 * k]
             sE += [(2, b0), (b0, b0 + 1), (b0 + 1, b0 + 2), (b0 + 2, b0 + 3)]
             hems.append((end, end - el, 0.033 * k))
         else:
             end = sh + (el - sh) * 0.5
             sV += [J['clav' + sd], sh, end]
-            sR += [0.068 * g * k, 0.06 * g * k, 0.058 * g * k]
+            sR += [0.07 * g * k, (0.06 if female else 0.066) * g * k, 0.058 * g * k]
             sE += [(2, b0), (b0, b0 + 1), (b0 + 1, b0 + 2)]
             hems.append((end, end - sh, 0.05 * g * k))
     skin_obj(S + 'Shirt', root, sV, sE, sR, top, subd=3)
@@ -1973,9 +2032,10 @@ def person(name, loc, yaw, seed, walk=None, phone=None):
     pE = [(0, 1)]
     for sd in ('L', 'R'):
         b0 = len(pV)
-        pV += [J['hip' + sd], J['knee' + sd], J['ank' + sd] + Vector((0, 0, 0.012))]
-        pR += [0.098 * g * k, 0.066 * g * k, 0.05 * k]
-        pE += [(1, b0), (b0, b0 + 1), (b0 + 1, b0 + 2)]
+        kn, an = J['knee' + sd], J['ank' + sd]
+        pV += [J['hip' + sd], kn, kn + (an - kn) * 0.35, an + Vector((0, 0, -0.018 * k))]
+        pR += [0.1 * g * k, 0.064 * g * k, 0.066 * g * k, 0.054 * k]
+        pE += [(1, b0), (b0, b0 + 1), (b0 + 1, b0 + 2), (b0 + 2, b0 + 3)]
     skin_obj(S + 'Trousers', root, pV, pE, pR, pants)
 
     # ---- shoes, head and hair, phone
@@ -2190,6 +2250,8 @@ PEOPLE_STUDIO = [
     ('people_walk34', (3.6, -3.6, 1.6), (0.0, -0.9, 1.0), 45, None),
     ('people_close', (1.7, -1.35, 1.55), (0.0, -1.35, 1.35), 50, None),
     ('people_face', (0.8, -0.45, 1.65), (0.0, -0.45, 1.6), 70, None),
+    ('people_hands', (0.75, -2.95, 0.95), (0.02, -2.45, 0.8), 50, None),
+    ('people_feet', (1.1, -1.25, 0.32), (0.0, -0.9, 0.08), 35, None),
 ]
 
 
