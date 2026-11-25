@@ -179,9 +179,31 @@ def children(root):
     return [o for o in bpy.data.objects if o.parent == root and o.type == 'MESH' and not o.hide_render]
 
 
-def combine(name, pieces, matfn, origin=Vector((0, 0, 0)), target_tris=None, face_filter=None):
+def tri_count(me):
+    return sum(len(p.vertices) - 2 for p in me.polygons)
+
+
+def decimated(me, ratio):
+    ob = bpy.data.objects.new('_reduce', me)
+    bpy.context.scene.collection.objects.link(ob)
+    md = ob.modifiers.new('Reduce', 'DECIMATE')
+    md.ratio = ratio
+    md.use_collapse_triangulate = True
+    bpy.context.view_layer.update()
+    me2 = baked(ob)
+    bpy.data.objects.remove(ob)
+    return me2
+
+
+LIGHT_PIECE = 2500
+
+
+def combine(name, pieces, matfn, origin=Vector((0, 0, 0)), target_tris=None, face_filter=None, per_piece=False):
     """Join (mesh, keep_face(center) or None) pieces into one object with simplified materials,
-    reduced to about target_tris triangles, with its origin at `origin`."""
+    reduced to about target_tris triangles, with its origin at `origin`.
+    per_piece (people): only the heavy pieces (the head) are reduced, each on its own. Reducing small open pieces
+    (the top of the trousers, a sleeve) stretches their end caps over the sides, and the smoothed normals then
+    tilt to the sky in a pale band. Cars (closed shells made of many small parts) are reduced as a whole."""
     mats, index = [], {}
     bm = bmesh.new()
     styled = []
@@ -213,6 +235,14 @@ def combine(name, pieces, matfn, origin=Vector((0, 0, 0)), target_tris=None, fac
             bmesh.ops.delete(tmp, geom=kill, context='FACES')
             tmp.to_mesh(me)
             tmp.free()
+    meshes = [me for me, _, _ in styled]
+    total = sum(tri_count(me) for me in meshes)
+    if per_piece and target_tris and total > target_tris:
+        light = sum(tri_count(me) for me in meshes if tri_count(me) < LIGHT_PIECE)
+        heavy = total - light
+        ratio = max(0.04, min(1.0, (target_tris - light) / max(1, heavy)))
+        meshes = [decimated(me, ratio) if tri_count(me) >= LIGHT_PIECE and ratio < 1 else me for me in meshes]
+    for me in meshes:
         bm.from_mesh(me)
     bmesh.ops.translate(bm, verts=bm.verts, vec=-origin)
     out = bpy.data.meshes.new(name)
@@ -225,19 +255,13 @@ def combine(name, pieces, matfn, origin=Vector((0, 0, 0)), target_tris=None, fac
     ob = bpy.data.objects.new(name, out)
     bpy.context.scene.collection.objects.link(ob)
     ob.location = origin
-    tris = sum(len(p.vertices) - 2 for p in out.polygons)
-    if target_tris and tris > target_tris:
-        md = ob.modifiers.new('Reduce', 'DECIMATE')
-        md.ratio = target_tris / tris
-        md.use_collapse_triangulate = True
-        bpy.context.view_layer.update()
-        me2 = baked(ob)
-        ob.modifiers.clear()
-        me2.transform(ob.matrix_world.inverted())
+    tris = tri_count(out)
+    if not per_piece and target_tris and tris > target_tris:
+        me2 = decimated(out.copy(), target_tris / tris)
         ob.data = me2
         set_active_colors(me2)
         keep_uv(me2)
-        tris = sum(len(p.vertices) - 2 for p in me2.polygons)
+        tris = tri_count(me2)
     for p in ob.data.polygons:
         p.use_smooth = True
     print('  %-14s %6d triangles, %d materials' % (name, tris, len(mats)))
@@ -362,13 +386,13 @@ for i, (female, style, sleeves, seed) in enumerate(VARIANTS):
     half = float(root['torso_half'])
     cores = {}
 
-    def core(me, z0, z1, key):
+    def core(me, z0, z1, key, shrink=0.86):
         vs = [v.co for v in me.vertices if z0 <= v.co.z <= z1 and abs(v.co.y) < half]
         if len(vs) < 8:
             return
         lo = Vector((min(v.x for v in vs), min(v.y for v in vs), z0))
         hi = Vector((max(v.x for v in vs), max(v.y for v in vs), z1))
-        c, r = (lo + hi) / 2, (hi - lo) / 2 * 0.86
+        c, r = (lo + hi) / 2, (hi - lo) / 2 * shrink
         cores[key] = game_xyz(c) + [round(r.y, 4), round(r.z, 4), round(r.x, 4)]
 
     parts = {'torso': [], 'armL': [], 'armR': [], 'legL': [], 'legR': []}
@@ -381,7 +405,9 @@ for i, (female, style, sleeves, seed) in enumerate(VARIANTS):
             # the shoulder balls must stay inside the shirt: 90% of the distance from the joint to its surface
             cores['shoulder_r'] = round(0.9 * min((v.co - J['shL']).length for v in me.vertices), 4)
         if 'Trousers' in nm:
-            core(me, min(J['hipL'].z, J['hipR'].z) - 0.08, J['waist'].z - 0.02, 'core_hips')
+            # kept low and slim: it must stay inside the trousers, below the shirt's hem, or it shows as a pale band
+            hz = min(J['hipL'].z, J['hipR'].z)
+            core(me, hz - 0.08, hz + 0.03, 'core_hips', shrink=0.72)
         if bones and ('Shirt' in nm or 'Body' in nm or 'Trousers' in nm):
             for part in parts:
                 if any(b[4] == part for b in bones):
@@ -404,7 +430,8 @@ for i, (female, style, sleeves, seed) in enumerate(VARIANTS):
                 tmp.to_mesh(m2)
                 tmp.free()
             meshes.append(m2)
-        ob = combine('P%d_%s' % (i, part), meshes, person_material, origin=origins[part], target_tris=targets[part])
+        ob = combine('P%d_%s' % (i, part), meshes, person_material, origin=origins[part], target_tris=targets[part],
+                     per_piece=True)
         ob['joint'] = game_xyz(origins[part])
         if part == 'torso':
             for k, v in cores.items():

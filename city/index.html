@@ -1027,7 +1027,7 @@ function updateCamera(dt){
   const want=new THREE.Vector3(camTarget.x-Math.sin(camYaw)*cp*dist,camTarget.y+Math.sin(camPitch)*dist,camTarget.z-Math.cos(camYaw)*cp*dist);
   // keep the camera out of the buildings and their awnings (1.7 m deep): walk from the target towards it and
   // stop before a facade
-  const M=want.y<4.5?1.9:0.4,steps=Math.ceil(dist/0.25);let ok=1;
+  const M=want.y>2.2&&want.y<4.5?1.9:0.4,steps=Math.ceil(dist/0.25);let ok=1;
   for(let k=1;k<=steps;k++){const t=k/steps,x=lerp(camTarget.x,want.x,t),z=lerp(camTarget.z,want.z,t);
     if(SOLIDS.some(s=>x>s.x0-M&&x<s.x1+M&&z>s.z0-M&&z<s.z1+M)){ok=(k-1)/steps;break;}}
   want.lerpVectors(camTarget,want,Math.max(0.15,ok));
@@ -1287,7 +1287,7 @@ $('play').addEventListener('click',startGame);
 requestAnimationFrame(frame);
 // for automated checks
 window.__city={get state(){return state;},start:startGame,player,cars:ALLCARS,peds,keys,camera,renderer,scene,NODES,SIGNALS,CHUNKS,
-  get job(){return job;},get money(){return money;},light,enterCar,exitCar,nearestCar,
+  get job(){return job;},get money(){return money;},cancelJob(){if(job)endJob(false,'');jobCool=0;},light,enterCar,exitCar,nearestCar,
   setYaw(v){camYaw=v;lookT=2;},setPitch(v){camPitch=v;},
   step(n,dt){dt=dt||1/60;for(let i=0;i<n;i++)update(dt);renderer.render(scene,camera);}};
 
