@@ -1631,6 +1631,368 @@ def car_i20(name, color, loc, rot_z):
     return root
 
 
+# ---------------------------------------------------------------- people
+# Each person is built from a skeleton: the Skin modifier gives every bone a thickness and subdivision
+# smooths it into a body. Clothes are separate, slightly larger skins over the body (shirt, trousers),
+# with shoes, a modelled head (jaw, nose, eyes, brows, lips, ears) and hair on top.
+SKIN_TONES = ['#f1c7a5', '#e3b08c', '#c98b66', '#a56c47', '#7c4d30', '#5b3723']
+HAIR_COLS = ['#16110f', '#2b1d15', '#4a3020', '#7a5230', '#b08a55', '#d2bd92', '#8c8580']
+TOP_COLS = ['#f2f2ee', '#1d1f24', '#2f4f7f', '#8a1f2b', '#3d6b4a', '#c9b48a', '#6b4a7a', '#d9822b', '#5f6b75', '#e8d7c0', '#b8c7d6']
+PANTS = [('jeans', '#2c4468'), ('jeans', '#3d5a80'), ('chinos', '#c2b08a'), ('chinos', '#2a2a2e'),
+         ('chinos', '#5a5f66'), ('jeans', '#1f2530'), ('chinos', '#4a3a2c')]
+SHOE_COLS = ['#efefec', '#1a1a1c', '#5a3a26', '#3a3f4a', '#8a8f96']
+
+
+def skin_obj(name, root, verts, edges, radii, mat, subd=2, roots=(0,)):
+    """A smooth skinned shape from a skeleton: verts, edges and a (width, depth) radius per vertex."""
+    me = bpy.data.meshes.new(name)
+    me.from_pydata([tuple(v) for v in verts], edges, [])
+    ob = bpy.data.objects.new(name, me)
+    COL.objects.link(ob)
+    ob.parent = root
+    md = ob.modifiers.new('Skin', 'SKIN')
+    md.use_smooth_shade = True
+    sv = me.skin_vertices[0].data
+    for i, r in enumerate(radii):
+        sv[i].radius = r if isinstance(r, tuple) else (r, r)
+    for r_ in roots:
+        sv[r_].use_root = True
+    sm = ob.modifiers.new('Smooth', 'SUBSURF')
+    sm.levels = subd
+    sm.render_levels = subd
+    me.materials.append(mat)
+    return ob
+
+
+def band(name, root, centre, axis, R, r, mat, n=40, m=10):
+    """A torus around `axis` through `centre`: a collar or a sleeve hem where cloth meets skin."""
+    a = Vector(axis).normalized()
+    u = a.orthogonal().normalized()
+    w = a.cross(u)
+    bm = bmesh.new()
+    rings = []
+    for i in range(n):
+        th = i / n * 2 * math.pi
+        d = u * math.cos(th) + w * math.sin(th)
+        rings.append([bm.verts.new(tuple(Vector(centre) + d * (R + r * math.cos(ph)) + a * (r * math.sin(ph))))
+                      for ph in [j / m * 2 * math.pi for j in range(m)]])
+    for i in range(n):
+        A_, B_ = rings[i], rings[(i + 1) % n]
+        for j in range(m):
+            bm.faces.new((A_[j], A_[(j + 1) % m], B_[(j + 1) % m], B_[j]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return mesh_obj(name, bm, [mat], parent=root, smooth=True)
+
+
+def human_pose(h, female, walk, phase, phone, rnd):
+    """Joint positions for a standing or walking person facing +x (left side +y), feet on the ground."""
+    k = h / 1.78
+    hipw = (0.105 if female else 0.095) * k
+    shw = (0.175 if female else 0.2) * k
+    J = {'pelvis': Vector((0, 0, 0.95 * k)), 'waist': Vector((0.005 * k, 0, 1.08 * k)),
+         'chest': Vector((0.012 * k, 0, 1.28 * k)), 'neck': Vector((0.008 * k, 0, 1.47 * k)),
+         'head': Vector((0.02 * k, 0, 1.64 * k))}
+    A = math.radians(24) if walk else 0.0
+    for side, sgn in (('L', 1), ('R', -1)):
+        th = A * math.sin(phase) * sgn                      # leg swing: + forward
+        if not walk:
+            th = math.radians(rnd.uniform(-3, 3)) + sgn * 0.0
+        back = max(0.0, -th) / (A if A else 1.0)
+        bend = math.radians(5 + 30 * back)
+        hip = Vector((0, sgn * hipw, 0.92 * k))
+        knee = hip + Vector((math.sin(th), sgn * 0.01, -math.cos(th))) * (0.43 * k)
+        ank = knee + Vector((math.sin(th - bend), 0, -math.cos(th - bend))) * (0.42 * k)
+        J['hip' + side], J['knee' + side], J['ank' + side] = hip, knee, ank
+        al = -0.9 * th if walk else math.radians(rnd.uniform(2, 6))      # arms swing against the legs
+        el = math.radians(14 + (12 if al > 0 else 4))
+        if phone and side == 'R':
+            al, el = math.radians(12), math.radians(105)               # forearm up, looking at a phone
+        sh = Vector((0, sgn * shw, 1.43 * k))
+        elb = sh + Vector((math.sin(al), sgn * 0.05, -math.cos(al))) * (0.29 * k)
+        wr = elb + Vector((math.sin(al + el), sgn * 0.02, -math.cos(al + el))) * (0.26 * k)
+        hand = wr + (wr - elb).normalized() * (0.16 * k)
+        thumb = wr + (wr - elb).normalized() * (0.06 * k) + Vector((0.025, -sgn * 0.01, 0)) * k
+        J['clav' + side] = Vector((0.0, sgn * shw * 0.55, 1.425 * k))
+        J['sh' + side], J['el' + side], J['wr' + side], J['hand' + side], J['thumb' + side] = sh, elb, wr, hand, thumb
+    dz = 0.085 * k - min(J['ankL'].z, J['ankR'].z)                     # the lower foot stands on the ground
+    for key in J:
+        J[key] = J[key] + Vector((0, 0, dz))
+    return J
+
+
+def shoe(name, root, ank, mat, sole_mat, k):
+    """A shoe from heel to toe, pitched so the toe stays on the ground when the heel lifts."""
+    heel = Vector((ank.x - 0.06 * k, ank.y, max(0.012, ank.z - 0.075 * k)))
+    toe = Vector((ank.x + 0.17 * k, ank.y, 0.012))
+    if heel.z > 0.03:                                           # heel lifted: pivot on the ball of the foot
+        toe = Vector((ank.x + 0.12 * k, ank.y, 0.012))
+    d = toe - heel
+    L = d.length
+    fwd = d.normalized()
+    up = Vector((0, 0, 1))
+    side = up.cross(fwd).normalized()
+    up = fwd.cross(side).normalized()
+    rings = []
+    for i in range(9):
+        t = i / 8
+        w = 0.05 * k * (0.75 + 0.25 * math.sin(math.pi * min(1.0, t * 1.15)))
+        hgt = 0.085 * k * (1 - 0.55 * t ** 1.5) if t > 0.25 else 0.085 * k
+        c = heel + fwd * (L * (t * 1.08 - 0.04))
+        ring = []
+        for j in range(12):
+            a = j / 12 * 2 * math.pi
+            ca, sa = math.cos(a), math.sin(a)
+            yy = w * math.copysign(abs(ca) ** 0.6, ca)
+            zz = (hgt / 2) * math.copysign(abs(sa) ** 0.6, sa) + hgt / 2 - 0.012
+            ring.append(tuple(c + side * yy + up * zz))
+        rings.append(ring)
+    so = mesh_obj(name, loft(rings), [mat], parent=root)
+    subsurf(so, 1)
+    sbm = bmesh.new()                                           # sole
+    for i in range(8):
+        t0, t1 = i / 8, (i + 1) / 8
+        a_ = heel + fwd * (L * (t0 * 1.08 - 0.04))
+        b_ = heel + fwd * (L * (t1 * 1.08 - 0.04))
+        w0 = 0.052 * k * (0.75 + 0.25 * math.sin(math.pi * min(1.0, t0 * 1.15)))
+        w1 = 0.052 * k * (0.75 + 0.25 * math.sin(math.pi * min(1.0, t1 * 1.15)))
+        q = [a_ - side * w0 - up * 0.014, b_ - side * w1 - up * 0.014, b_ + side * w1 - up * 0.014, a_ + side * w0 - up * 0.014,
+             a_ - side * w0 + up * 0.004, b_ - side * w1 + up * 0.004, b_ + side * w1 + up * 0.004, a_ + side * w0 + up * 0.004]
+        bm_hex(sbm, [tuple(v) for v in q], 0)
+    bmesh.ops.recalc_face_normals(sbm, faces=sbm.faces)
+    mesh_obj(name + 'Sole', sbm, [sole_mat], parent=root, bevel=0.004)
+
+
+def head(name, root, J, k, female, skin, hair_col, lip_col, eye_mat, white_mat, style, yaw, pitch):
+    """Head with jaw and chin, nose, eyes, brows, lips and ears, and hair."""
+    from mathutils import Matrix
+    M = Matrix.Translation(J['head']) @ Matrix.Rotation(yaw, 4, 'Z') @ Matrix.Rotation(pitch, 4, 'Y') @ Matrix.Scale(k, 4)
+    fw = 0.93 if female else 1.0                                 # a narrower jaw for women
+    # (dz, front depth, back depth, half width): chin, jaw, mouth, nose, eyes, forehead, crown
+    prof = [(-0.118, 0.012, 0.01, 0.012), (-0.112, 0.062, 0.035, 0.04 * fw), (-0.085, 0.082, 0.07, 0.062 * fw),
+            (-0.05, 0.093, 0.092, 0.07), (-0.01, 0.1, 0.1, 0.076), (0.035, 0.1, 0.106, 0.079),
+            (0.075, 0.091, 0.103, 0.077), (0.105, 0.071, 0.088, 0.066), (0.128, 0.042, 0.055, 0.042), (0.138, 0.01, 0.012, 0.01)]
+
+    def ring(dz, fr, bk, w, n=16, grow=0.0):
+        pts = []
+        for j in range(n):
+            a = j / n * 2 * math.pi
+            ca, sa = math.cos(a), math.sin(a)
+            x = (fr if ca > 0 else bk) * math.copysign(abs(ca) ** 0.85, ca) * (1 + grow)
+            y = w * math.copysign(abs(sa) ** 0.85, sa) * (1 + grow)
+            pts.append((x, y, dz * (1 + grow * 0.6)))
+        return pts
+    fine = []                                                    # twice as many rings, for a clean hairline
+    for a_, b_ in zip(prof[:-1], prof[1:]):
+        fine += [a_, tuple((x + y) / 2 for x, y in zip(a_, b_))]
+    fine.append(prof[-1])
+    hb = loft([ring(*p_, n=32) for p_ in fine])
+    if style != 'bald':                                          # scalp hair: the hair colour on the skull
+        for f in hb.faces:
+            c = f.calc_center_median()
+            front = c.x > 0.02 and c.z < 0.07
+            ears = abs(c.y) > 0.05 and c.z < 0.012 and c.x > -0.035
+            if not front and not ears and c.z > -0.035:
+                f.material_index = 1
+    bmesh.ops.transform(hb, verts=hb.verts, matrix=M)
+    ho = mesh_obj(name + 'Head', hb, [skin, hair_col], parent=root)
+    subsurf(ho, 2)
+    # features are placed on the real (subdivided) face surface, measured with rays, so none sink in
+    bpy.context.view_layer.update()
+    he = ho.evaluated_get(bpy.context.evaluated_depsgraph_get())
+    Mi = M.inverted()
+    back = (M.to_3x3() @ Vector((-1, 0, 0))).normalized()
+
+    def surf_x(y, z):
+        hit, loc, nor, _ = he.ray_cast(M @ Vector((0.3, y, z)), back, distance=2.0)
+        return (Mi @ loc).x if hit else 0.095
+    fb = bmesh.new()
+    # nose: a hull growing out of the face, with a rounded tip and nostril wings
+    nx0 = surf_x(0.0, -0.012) - 0.093
+    nose = [(0.086, 0.0, 0.042), (0.09, 0.007, 0.012), (0.09, -0.007, 0.012), (0.118, 0.0, -0.017), (0.112, 0.006, -0.026),
+            (0.112, -0.006, -0.026), (0.102, 0.016, -0.03), (0.102, -0.016, -0.03), (0.095, 0.01, -0.036), (0.095, -0.01, -0.036),
+            (0.108, 0.0, -0.035), (0.084, 0.014, -0.028), (0.084, -0.014, -0.028)]
+    vs = [fb.verts.new((p_[0] + nx0, p_[1], p_[2])) for p_ in nose]
+    bmesh.ops.convex_hull(fb, input=vs)
+    bmesh.ops.transform(fb, verts=fb.verts, matrix=M)
+    no = mesh_obj(name + 'Nose', fb, [skin], parent=root, smooth=True)
+    subsurf(no, 2)
+    eb = bmesh.new()
+
+    def ell(bm, c, r, mi):
+        ret = bmesh.ops.create_uvsphere(bm, u_segments=20, v_segments=12, radius=1.0)
+        bmesh.ops.scale(bm, verts=ret['verts'], vec=r)
+        bmesh.ops.translate(bm, verts=ret['verts'], vec=c)
+        for f in {f for v in ret['verts'] for f in v.link_faces}:
+            f.material_index = mi
+    for sgn in (1, -1):
+        ex = surf_x(sgn * 0.032, 0.035)
+        ell(eb, (ex - 0.005, sgn * 0.032, 0.035), (0.0115, 0.0135, 0.0092), 0)       # eyeball, just out of the socket
+        ell(eb, (ex + 0.0062, sgn * 0.032, 0.0345), (0.0016, 0.0056, 0.0056), 1)     # iris and pupil
+        ell(eb, (ex - 0.0025, sgn * 0.032, 0.0408), (0.0112, 0.0152, 0.0058), 3)     # upper eyelid
+        bx = surf_x(sgn * 0.034, 0.055)
+        ell(eb, (bx + 0.0005, sgn * 0.034, 0.0545), (0.003, 0.019, 0.0024), 2)       # eyebrow
+        ell(eb, (0.0, sgn * 0.077, 0.008), (0.014, 0.0055, 0.026), 3)               # ear
+    mx = surf_x(0.0, -0.057)
+    ell(eb, (mx - 0.0005, 0.0, -0.0535), (0.0045, 0.019, 0.0036), 4)                # upper lip
+    ell(eb, (mx - 0.0012, 0.0, -0.0608), (0.0048, 0.017, 0.0042), 4)                # lower lip
+    bmesh.ops.transform(eb, verts=eb.verts, matrix=M)
+    mesh_obj(name + 'Face', eb, [white_mat, eye_mat, hair_col, skin, lip_col], parent=root, smooth=True)
+    if style in ('bald', 'short'):
+        return
+    # long hair and buns: a shell over the skull, open over the face
+    long_ = style == 'long'
+    hb2 = loft([ring(p_[0], p_[1], p_[2], p_[3], 24, 0.05 if not long_ else 0.075) for p_ in prof[3:]])
+    kill = []
+    for v in hb2.verts:
+        x, y, z = v.co
+        if x > 0.02 and z < (0.072 if not long_ else 0.068):
+            if not (long_ and abs(y) > 0.06):                    # long hair comes down past the temples
+                kill.append(v)
+                continue
+        if z < (-0.13 if long_ else -0.03):
+            kill.append(v)
+        elif not long_ and abs(y) > 0.05 and z < 0.012 and x > -0.035:
+            kill.append(v)                                      # short hair stops above the ears
+    bmesh.ops.delete(hb2, geom=kill, context='VERTS')
+    bmesh.ops.transform(hb2, verts=hb2.verts, matrix=M)
+    hro = mesh_obj(name + 'Hair', hb2, [hair_col], parent=root)
+    subsurf(hro, 2)
+    sol = hro.modifiers.new('Thick', 'SOLIDIFY')
+    sol.thickness = 0.007 if not long_ else 0.012
+    sol.offset = -1
+    if long_:                                                   # hair falling to the shoulders behind the head
+        rings = []
+        for i in range(8):
+            t = i / 7
+            dz = lerp(0.07, -0.24, t)
+            w = lerp(0.09, 0.1, t)
+            dx = lerp(0.075, 0.035, t)
+            cx = lerp(-0.035, -0.075, t)
+            rings.append([(cx + dx * math.copysign(abs(math.cos(a_)) ** 0.8, math.cos(a_)),
+                           w * math.copysign(abs(math.sin(a_)) ** 0.8, math.sin(a_)), dz)
+                          for a_ in [j / 16 * 2 * math.pi for j in range(16)]])
+        lb = loft(rings)
+        bmesh.ops.transform(lb, verts=lb.verts, matrix=M)
+        lo = mesh_obj(name + 'HairLong', lb, [hair_col], parent=root)
+        subsurf(lo, 2)
+    if style == 'bun':
+        bb = bmesh.new()
+        ret = bmesh.ops.create_uvsphere(bb, u_segments=20, v_segments=12, radius=0.042)
+        bmesh.ops.translate(bb, verts=ret['verts'], vec=(-0.09, 0, 0.095))
+        bmesh.ops.transform(bb, verts=bb.verts, matrix=M)
+        mesh_obj(name + 'Bun', bb, [hair_col], parent=root, smooth=True)
+
+
+def person(name, loc, yaw, seed, walk=None, phone=None):
+    """A pedestrian standing on the ground at loc, facing yaw (radians, 0 = +x)."""
+    rnd = random.Random(seed)
+    female = rnd.random() < 0.5
+    h = rnd.uniform(1.62, 1.74) if female else rnd.uniform(1.7, 1.88)
+    k = h / 1.78
+    g = rnd.uniform(0.92, 1.15)                                  # build
+    walk = rnd.random() < 0.6 if walk is None else walk
+    phone = (not walk and rnd.random() < 0.35) if phone is None else phone
+    J = human_pose(h, female, walk, rnd.uniform(0, 2 * math.pi), phone, rnd)
+    root = empty(name, loc, yaw)
+    S = name + '_'
+    skin = principled(S + 'Skin', srgb(rnd.choice(SKIN_TONES)), rough=0.5, spec=0.4)
+    try:
+        b = skin.node_tree.nodes['Principled BSDF']
+        b.inputs['Subsurface Weight'].default_value = 0.12
+        b.inputs['Subsurface Radius'].default_value = (0.01, 0.004, 0.002)
+    except Exception:
+        pass
+    hair_col = principled(S + 'Hair', srgb(rnd.choice(HAIR_COLS)), rough=0.45, spec=0.5)
+    tone = srgb(rnd.choice(SKIN_TONES))
+    skin.node_tree.nodes['Principled BSDF'].inputs['Base Color'].default_value = (*tone, 1)
+    lip_col = principled(S + 'Lips', (tone[0] * 0.82, tone[1] * 0.55, tone[2] * 0.55) if not female else (tone[0] * 0.8, tone[1] * 0.42, tone[2] * 0.45), rough=0.35)
+    eye_mat = principled(S + 'Iris', srgb(rnd.choice(['#2b1a10', '#3d2a17', '#2f4a5a', '#3c4a2a'])), rough=0.05, spec=1.0)
+    white_mat = principled(S + 'EyeWhite', srgb('#ece8e2'), rough=0.1, spec=0.8)
+    top = principled(S + 'Top', srgb(rnd.choice(TOP_COLS)), rough=0.85, spec=0.3)
+    kind, pc = rnd.choice(PANTS)
+    if kind == 'jeans':
+        pants = textured(S + 'Jeans', 'plaster', srgb(pc), tuple(min(1, c * 1.35) for c in srgb(pc)), rough=0.85, bump=0.2)
+    else:
+        pants = principled(S + 'Trousers', srgb(pc), rough=0.8, spec=0.3)
+    shoe_mat = principled(S + 'Shoe', srgb(rnd.choice(SHOE_COLS)), rough=0.5, spec=0.4)
+    sole_mat = principled(S + 'Sole', srgb('#e8e6e0' if rnd.random() < 0.5 else '#1b1b1c'), rough=0.7)
+    long_sleeves = rnd.random() < 0.45
+    style = rnd.choice(['short', 'short', 'bald'] if not female else ['long', 'long', 'bun', 'short'])
+
+    def grow(r, f=1.12, a=0.008):
+        return (r[0] * f + a, r[1] * f + a) if isinstance(r, tuple) else r * f + a
+    torso = [((0.165 if female else 0.15) * g * k, (0.11 if female else 0.105) * g * k),     # hips
+             ((0.12 if female else 0.13) * g * k, 0.09 * g * k),                             # waist
+             ((0.15 if female else 0.168) * g * k, 0.108 * g * k)]                           # chest
+    # ---- bare skin where it shows: the neck, and the arms below the sleeves with hands and thumbs
+    V = [J['neck'] + Vector((0, 0, -0.06 * k)), J['neck'], J['head'] + Vector((-0.012, 0, -0.07)) * k]
+    R = [0.052 * k, 0.052 * k, 0.05 * k]
+    E = [(0, 1), (1, 2)]
+    roots = [0]
+    for sd in ('L', 'R'):
+        sh, el, wr = J['sh' + sd], J['el' + sd], J['wr' + sd]
+        b0 = len(V)
+        roots.append(b0)
+        if long_sleeves:
+            V += [wr - (wr - el) * 0.3, wr, J['hand' + sd], J['thumb' + sd]]
+            R += [0.034 * k, 0.032 * k, (0.043 * k, 0.016 * k), 0.013 * k]
+            E += [(b0, b0 + 1), (b0 + 1, b0 + 2), (b0 + 1, b0 + 3)]
+        else:
+            V += [sh + (el - sh) * 0.35, el, wr, J['hand' + sd], J['thumb' + sd]]
+            R += [0.05 * g * k, 0.045 * g * k, 0.032 * k, (0.043 * k, 0.016 * k), 0.013 * k]
+            E += [(b0, b0 + 1), (b0 + 1, b0 + 2), (b0 + 2, b0 + 3), (b0 + 2, b0 + 4)]
+    skin_obj(S + 'Body', root, V, E, R, skin, roots=roots)
+
+    # ---- shirt / T-shirt: it gives the torso its shape
+    sV = [J['pelvis'] + Vector((0, 0, 0.005)), J['waist'], J['chest'], J['neck'] + Vector((0, 0, -0.045 * k))]
+    sR = [grow(torso[0], 1.02, 0.004), grow(torso[1], 1.0, 0.006), grow(torso[2], 1.0, 0.006), 0.075 * k]
+    sE = [(0, 1), (1, 2), (2, 3)]
+    hems = []
+    for sd in ('L', 'R'):
+        b0 = len(sV)
+        sh, el, wr = J['sh' + sd], J['el' + sd], J['wr' + sd]
+        if long_sleeves:
+            end = wr - (wr - el) * 0.15
+            sV += [J['clav' + sd], sh, el, end]
+            sR += [0.068 * g * k, 0.06 * g * k, 0.048 * g * k, 0.04 * k]
+            sE += [(2, b0), (b0, b0 + 1), (b0 + 1, b0 + 2), (b0 + 2, b0 + 3)]
+            hems.append((end, end - el, 0.033 * k))
+        else:
+            end = sh + (el - sh) * 0.5
+            sV += [J['clav' + sd], sh, end]
+            sR += [0.068 * g * k, 0.06 * g * k, 0.058 * g * k]
+            sE += [(2, b0), (b0, b0 + 1), (b0 + 1, b0 + 2)]
+            hems.append((end, end - sh, 0.05 * g * k))
+    skin_obj(S + 'Shirt', root, sV, sE, sR, top, subd=3)
+    collar_c = J['neck'] + Vector((0.004, 0, -0.036 * k))
+    band(S + 'Collar', root, collar_c, (0.25, 0, 1), 0.056 * k, 0.009 * k, top)
+
+    # ---- trousers or jeans: from inside the shirt down to the shoes
+    pV = [J['waist'] + Vector((0, 0, -0.03 * k)), J['pelvis']]
+    pR = [grow(torso[1], 0.95, 0.0), grow(torso[0], 1.0, 0.0)]
+    pE = [(0, 1)]
+    for sd in ('L', 'R'):
+        b0 = len(pV)
+        pV += [J['hip' + sd], J['knee' + sd], J['ank' + sd] + Vector((0, 0, 0.012))]
+        pR += [0.098 * g * k, 0.066 * g * k, 0.05 * k]
+        pE += [(1, b0), (b0, b0 + 1), (b0 + 1, b0 + 2)]
+    skin_obj(S + 'Trousers', root, pV, pE, pR, pants)
+
+    # ---- shoes, head and hair, phone
+    for sd in ('L', 'R'):
+        shoe(S + 'Shoe' + sd, root, J['ank' + sd], shoe_mat, sole_mat, k)
+    head(S, root, J, k, female, skin, hair_col, lip_col, eye_mat, white_mat, style,
+         math.radians(rnd.uniform(-12, 12)), math.radians(16 if phone else rnd.uniform(-4, 4)))
+    if phone:
+        pb = bmesh.new()
+        c = J['handR'] + Vector((-0.01, 0.0, 0.0))
+        bm_box(pb, c.x - 0.006, c.y - 0.036, c.z - 0.075, c.x + 0.006, c.y + 0.036, c.z + 0.075, 0)
+        from mathutils import Matrix
+        bmesh.ops.rotate(pb, verts=pb.verts, cent=c, matrix=Matrix.Rotation(math.radians(-50), 3, 'Y'))   # screen tilted up
+        mesh_obj(S + 'Phone', pb, [principled(S + 'PhoneMat', srgb('#0d0e10'), rough=0.15, spec=0.8)], parent=root, bevel=0.005)
+    return root
+
+
 # ---------------------------------------------------------------- world and lights
 def world(sun_elev_deg, sun_az_deg, strength=1.0):
     w = bpy.data.worlds.new('Sky')
@@ -1706,6 +2068,23 @@ def build():
     car('ParkedWhite', '#e9e8e4', (12.5, 6.0, 0.0), math.pi)
     car('ParkedBlack', '#121316', (19.5, -6.0, 0.0), 0.0)
     car('OncomingSilver', '#8c9096', (44.0, 2.0, 0.0), math.pi)
+    # pedestrians: walking along both sidewalks (clear of the lamp posts), standing at shop windows,
+    # and a few crossing at the crosswalk
+    pr = random.Random(2024)
+    n = 0
+    for side in (1, -1):
+        x = -30.0
+        while x < 100:
+            x += pr.uniform(3.0, 7.0)
+            if 26 < x < 34:
+                continue
+            if pr.random() < 0.3:                                      # standing by a shop window, facing the street
+                person('Ped%d' % n, (x, side * pr.uniform(11.4, 11.9), 0.15), -side * math.pi / 2 + pr.uniform(-0.6, 0.6), 500 + n, walk=False)
+            else:                                                      # walking along the sidewalk
+                person('Ped%d' % n, (x, side * pr.uniform(9.2, 10.8), 0.15), (0.0 if pr.random() < 0.5 else math.pi) + pr.uniform(-0.12, 0.12), 500 + n, walk=True)
+            n += 1
+    for i, (x, y, yaw) in enumerate([(29.0, -3.5, math.pi / 2), (30.4, -2.2, math.pi / 2), (29.6, 2.8, -math.pi / 2), (31.2, 4.6, -math.pi / 2)]):
+        person('Crossing%d' % i, (x, y, 0.0), yaw, 900 + i, walk=True)
     car('ParkedGreen', '#23493a', (-14.0, -6.0, 0.0), 0.0)
 
 
@@ -1806,10 +2185,26 @@ I20_STUDIO = [
 ]
 
 
+PEOPLE_STUDIO = [
+    ('people_group', (6.0, 0.0, 1.45), (0.0, 0.0, 0.95), 35, None),
+    ('people_walk34', (3.6, -3.6, 1.6), (0.0, -0.9, 1.0), 45, None),
+    ('people_close', (1.7, -1.35, 1.55), (0.0, -1.35, 1.35), 50, None),
+    ('people_face', (0.8, -0.45, 1.65), (0.0, -0.45, 1.6), 70, None),
+]
+
+
 def main():
     setup_render(QUICK)
     world(sun_elev_deg=5.0, sun_az_deg=62.0, strength=1.0)
-    if '--carstudio' in argv:
+    if '--peoplestudio' in argv:
+        bm = bmesh.new()
+        bm_box(bm, -30, -30, -0.2, 30, 30, 0.0, 0)
+        mesh_obj('Ground', bm, [M['concrete']])
+        for i, y in enumerate((-2.25, -1.35, -0.45, 0.45, 1.35, 2.25)):
+            person('Person%d' % i, (0.0, y, 0.0), [0.15, -0.3, 0.05, 0.4, -0.1, 0.25][i], 101 + i * 7,
+                   walk=[False, True, False, True, False, True][i], phone=[False, False, True, False, False, False][i])
+        cams = [(s_[0], camera(*s_)) for s_ in PEOPLE_STUDIO]
+    elif '--carstudio' in argv:
         bm = bmesh.new()
         bm_box(bm, -30, -30, -0.2, 30, 30, 0.0, 0)
         mesh_obj('Ground', bm, [M['asphalt']])

@@ -8,6 +8,7 @@
 - Two car models:
   - A **Hyundai i20 Active** (2015–2020), built to its published size (4.0 × 1.76 × 1.555 m, 2.57 m wheelbase, 195/55 R16). It has black arch and sill cladding, skid plates, roof rails, a spoiler, black B- and C-pillars, a hexagonal grille, fog lamps, swept headlights and wrap-around tail lights (all unlit, with clear glass), and a full interior.
   - A generic sedan with the same level of detail.
+- People: men and women of different heights, builds and skin tones, built from a skeleton (Skin modifier + subdivision), wearing a T-shirt or long-sleeved top, jeans or trousers and shoes. They have a modelled head (jaw, nose, eyes with lids, eyebrows, lips, ears), short, long or tied-up hair, and stand, walk or look at a phone. About 30 of them are on the street: on the sidewalks, at the shop windows and on the crosswalk.
 - The street: asphalt, road markings and a crosswalk, curbs, paved sidewalks, street lamps with real spot lights, hydrants and bins.
 - A physical sunset sky with a matching sun.
 
@@ -20,6 +21,7 @@ blender --background --python sunset_bay_city.py -- renders --only 02_hero_car_f
 blender --background --python sunset_bay_city.py -- renders --blend city.blend   # also save the scene
 blender --background --python sunset_bay_city.py -- renders --carstudio i20  # the i20 alone, ten studio shots
 blender --background --python sunset_bay_city.py -- renders --carstudio      # the sedan alone
+blender --background --python sunset_bay_city.py -- renders --peoplestudio   # six people and close-ups
 ```
 
 It also runs with the `bpy` Python module (`pip install bpy`): `python sunset_bay_city.py -- renders`.
