@@ -829,12 +829,12 @@ def palm(name, H, seed, detailed=True):
     bmesh.ops.translate(bm, verts=ret['verts'], vec=top + Vector((0, 0, 0.1)))
     for f in {f for v in ret['verts'] for f in v.link_faces}:
         f.material_index = 2
-    nf = 18 if detailed else 10
+    nf = 24 if detailed else 12
     for i in range(nf):
         az = 2 * math.pi * i / nf + rnd.uniform(-0.15, 0.15)
         dry = detailed and i % 6 == 0
         el0 = rnd.uniform(-1.1, -0.6) if dry else rnd.uniform(0.15, 0.95)
-        L = rnd.uniform(3.0, 3.9) * (H / 11) ** 0.3
+        L = rnd.uniform(4.3, 5.3) * (H / 11) ** 0.3                     # a crown 8-10 m across, like a grown date palm
         droop = rnd.uniform(0.9, 1.6)
         mi = 2 if dry else 1
         npts = 10 if detailed else 5
