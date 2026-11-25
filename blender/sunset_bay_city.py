@@ -1756,8 +1756,11 @@ def human_pose(h, female, walk, phase, phone, rnd, neutral=False):
         if phone and side == 'R':
             al, el = math.radians(12), math.radians(105)               # forearm up, looking at a phone
         sh = Vector((0, sgn * shw, 1.43 * k))
-        elb = sh + Vector((math.sin(al), sgn * 0.05, -math.cos(al))) * (0.29 * k)
-        wr = elb + Vector((math.sin(al + el), sgn * 0.02, -math.cos(al + el))) * (0.26 * k)
+        # the arms hang a little out from the body; in the neutral (game export) pose a little more, so the sleeves
+        # stay clear of the shirt's sides and the game can swing them on their own
+        out_el, out_wr = (0.14, 0.16) if neutral else (0.05, 0.02)
+        elb = sh + Vector((math.sin(al), sgn * out_el, -math.cos(al))) * (0.29 * k)
+        wr = elb + Vector((math.sin(al + el), sgn * out_wr, -math.cos(al + el))) * (0.26 * k)
         hand = wr + (wr - elb).normalized() * (0.16 * k)
         thumb = wr + (wr - elb).normalized() * (0.06 * k) + Vector((0.025, -sgn * 0.01, 0)) * k
         J['clav' + side] = Vector((0.0, sgn * shw * 0.55, 1.425 * k))

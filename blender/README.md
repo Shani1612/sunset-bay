@@ -26,4 +26,15 @@ blender --background --python sunset_bay_city.py -- renders --peoplestudio   # s
 
 It also runs with the `bpy` Python module (`pip install bpy`): `python sunset_bay_city.py -- renders`.
 
+## Game models
+
+```
+blender --background --python export_game_assets.py      # or: python export_game_assets.py
+```
+
+writes `../assets/sunset_bay.glb`, which the game (`index.html`) loads on desktop:
+- **The i20 and the sedan:** body without wheels, about 15,000 triangles each, with simple materials (`Paint`, `Glass`, `Chrome`, `RedLens`, ...) so the game can repaint each car and light its brake lights. There is one wheel per car, centred on its axle.
+- **Six people (three men, three women) in a neutral pose:** each is split at the shoulders and hips into torso, arms and legs, so the game can swing the limbs. A face goes to the bone it is nearest to relative to that bone's thickness. The node extras hold the joints, the hand positions and the inner cores, all in the game's axes.
+- **Close-cropped hair:** exported as each vertex's height above the hairline, which the game's scalp shader turns into a sharp hairline.
+
 Tested with Blender 5.1. The rendered shots are in `renders/`.

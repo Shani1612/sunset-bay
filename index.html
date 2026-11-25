@@ -358,6 +358,7 @@ body.touch .say{font-size:11px;padding:2px 7px}
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script>
 (function(){
 'use strict';
@@ -431,6 +432,10 @@ function mat(c){return matCache[c]||(matCache[c]=new THREE.MeshStandardMaterial(
 const geoCache={};
 function boxGeo(w,h,d){const k=w+'|'+h+'|'+d;return geoCache[k]||(geoCache[k]=new THREE.BoxGeometry(w,h,d));}
 function box(w,h,d,c){const m=new THREE.Mesh(boxGeo(w,h,d),mat(c));m.castShadow=true;return m;}
+// detailed cars and people made in Blender (blender/export_game_assets.py -> assets/sunset_bay.glb), see hiLoad()
+const HI={ready:false,people:[],cars:{},pending:[],paints:{},scalps:{},empty:new THREE.BufferGeometry(),PS:1.15};
+HI.empty.setAttribute('position',new THREE.BufferAttribute(new Float32Array(0),3));
+const HI_CAR={sedan:'sedan',suv:'i20'};   // game car models that get a detailed body
 const glowCache={};
 function glow(c){return glowCache[c]||(glowCache[c]=new THREE.MeshBasicMaterial({color:c}));}
 
@@ -813,7 +818,7 @@ function makeWalkInShop(sp,f,def,kind){
     // window display: two mannequins in this season's outfits
     for(const [mx,sh,pa] of [[-W/2+1.0,'#e63946','#2b2d42'],[-W/2+2.3,'#2a9d8f','#5c4d3c']]){
       Bx(0.9,0.2,0.9,'#c9c4d0',mx,0.3+0.1,-0.9);lcol(mx,-0.9,0.9,0.9,2);
-      const mq=makePerson(sh,pa,'#e9e2d6','#e9e2d6');g.add(mq.g);mq.g.position.set(mx,0.5,-0.9);mq.armL.rotation.z=-0.15;mq.armR.rotation.z=0.15;
+      const mq=makePerson(sh,pa,'#e9e2d6','#e9e2d6',true);g.add(mq.g);mq.g.position.set(mx,0.5,-0.9);mq.armL.rotation.z=-0.15;mq.armR.rotation.z=0.15;
     }
     shop.keeperSpec={lx:kX,lz:-D+0.7,shirt:'#8338ec',hair:'#d8b25a'};
     st('rob',kX,kZ+1.0,'#ff5d7d');st('shirt',1.5,-D+2.0,'#ffd25a');st('outfit',W/2-1.75,-3.4,'#ffd25a');st('hat',hX,-0.9,'#ffd25a');
@@ -1344,7 +1349,7 @@ const SKIN=['#f1c6a3','#e0a37a','#b97a52','#8a5a3c','#f5d3b8'];
 const HAIR=['#2a1d18','#5b3a24','#d8b25a','#1a1a1a','#a5452f','#e8e2d8'];
 const SHIRT=['#e63946','#ffb703','#2a9d8f','#3a86ff','#8338ec','#fb8500','#f1faee','#06d6a0','#ff5d8f','#264653'];
 const PANTS=['#2b2d42','#3d405b','#5c4d3c','#1d3557','#6d597a'];
-function makePerson(shirt,pants,skin,hair){
+function makePerson(shirt,pants,skin,hair,plain){
   const g=new THREE.Group();
   const torso=box(0.7,0.75,0.4,shirt);torso.position.y=1.27;
   const head=box(0.42,0.42,0.42,skin);head.position.y=1.88;
@@ -1360,11 +1365,14 @@ function makePerson(shirt,pants,skin,hair){
   const f2=box(0.22,0.22,0.24,skin);f2.position.y=-0.76;armR.add(f2);
   g.add(torso,head,hr,legL,legR,armL,armR);
   scene.add(g);
-  return {g,torso,hair:hr,legL,legR,armL,armR,phase:Math.random()*6};
+  const p={g,torso,hair:hr,legL,legR,armL,armR,phase:Math.random()*6,boxes:[torso,head,hr,l1,l2,a1,a2,f1,f2]};
+  if(!plain)hiAdd(p,hiPerson);   // plain: shop-window mannequins keep the simple faceless figure
+  return p;
 }
 function animPerson(p,speed,dt){
   p.phase+=dt*(2+speed*1.6);
-  const s=Math.sin(p.phase)*Math.min(1,speed/2.5)*0.75;
+  if(p.hi)hiPersonSync(p);
+  const s=Math.sin(p.phase)*Math.min(1,speed/2.5)*(p.hi?0.6:0.75);
   p.legL.rotation.x=s;p.legR.rotation.x=-s;p.armL.rotation.x=-s*0.9;p.armR.rotation.x=s*0.9;
 }
 
@@ -1695,13 +1703,173 @@ function makeCar(type,model,x,z,a){
     hp:M.hp,maxHp:M.hp,ho:M.len/2-0.95,offs:M.len>6?[M.len/2-0.95,M.len/6,-M.len/6,-(M.len/2-0.95)]:[M.len/2-0.95,-(M.len/2-0.95)],nozzle:G.nozzle,
     burning:false,fireT:0,reported:false,reportT:0,douse:0,steamT:0,fireTarget:null,sprayT:0,cruise:rand(9,13),from:null,to:null,wait:0,ghost:0,stuck:0,reverseT:0,mode:'graph',
     prevA:a,prevS:0,roll:0,pitch:0,steerVis:0,braking:false,burnT:0,wreckAge:0,officerOut:false,topY:G.topY};
-  cars.push(car);return car;
+  cars.push(car);
+  if(HI_CAR[model])hiAdd(car,hiCar);
+  return car;
 }
 function removeCar(car){
   if(car.slot){car.slot.car=null;car.slot=null;}
   scene.remove(car.g);car.tailMat.dispose();
   if(car.bar){car.bar.r.dispose();car.bar.b.dispose();}
   const i=cars.indexOf(car);if(i>=0)cars.splice(i,1);
+}
+
+// ---------- detailed cars and people from Blender ----------
+// assets/sunset_bay.glb (made by blender/export_game_assets.py) holds the Hyundai i20 (used for the SUVs), the sedan,
+// and six people split at the shoulders and hips. It loads in the background; until it arrives, on phones, or if it
+// cannot load, the simple models stay. Each car and person is upgraded in place: the simple meshes keep their
+// materials (the game recolours through them) but draw nothing, and the detailed parts hang in the same groups,
+// so animation, physics and game logic are unchanged.
+function hiAdd(o,up){
+  if(HI.ready){try{up(o);}catch(e){console.warn('detailed model',e);}}
+  else if(!HI.failed)HI.pending.push([o,up]);
+}
+function hiFail(e){console.warn('detailed models unavailable, keeping the simple ones',e);HI.failed=true;HI.pending.length=0;}
+function hiLoad(){
+  if(MOBILE||!THREE.GLTFLoader){hiFail('not loaded on this device');return;}
+  new THREE.GLTFLoader().load('assets/sunset_bay.glb',gltf=>{
+    try{
+      // glTF colours are linear; this renderer works in display colours like the rest of the game
+      const lin=v=>v<=0.0031308?v*12.92:1.055*Math.pow(v,1/2.4)-0.055,seen=new Set();
+      gltf.scene.traverse(o=>{
+        if(!o.isMesh)return;
+        const m=o.material;
+        if(!seen.has(m)){seen.add(m);m.color.convertLinearToSRGB();m.emissive.convertLinearToSRGB();}
+        const c=o.geometry.getAttribute('color');
+        if(c&&!seen.has(c)){
+          seen.add(c);
+          const a=c.array,n=c.normalized?(a instanceof Uint8Array?255:65535):1,k=c.itemSize;
+          for(let i=0;i<a.length;i++)if(i%k<3)a[i]=n===1?lin(a[i]):Math.round(lin(a[i]/n)*n);
+        }
+      });
+      const node=n=>{const o=gltf.scene.getObjectByName(n);if(!o)throw new Error('missing '+n);return o;};
+      // a node's meshes turned into game axes (x left, y up, z forward) about the node's own origin
+      const tpl=n=>{
+        const parts=[],rot=new THREE.Matrix4().makeRotationY(-Math.PI/2),o=node(n);
+        o.traverse(q=>{if(q.isMesh){const g=q.geometry.clone();g.applyMatrix4(rot);g.computeBoundingSphere();parts.push({geo:g,mat:q.material,name:q.material.name});}});
+        return {parts,x:o.userData};
+      };
+      for(const k of ['i20','sedan']){
+        const body=tpl('car_'+k),red=body.parts.find(p=>p.name==='RedLens');
+        HI.cars[k]={body,wheel:tpl('wheel_'+k),x:body.x,red:red?red.mat:new THREE.MeshStandardMaterial({color:0x8e0c08})};
+      }
+      for(let i=0;gltf.scene.getObjectByName('P'+i+'_torso');i++){
+        const v={};
+        for(const part of ['torso','armL','armR','legL','legR'])v[part]=tpl('P'+i+'_'+part);
+        v.female=!!v.torso.x.female;
+        HI.people.push(v);
+      }
+      if(!HI.people.length)throw new Error('no people');
+      HI.wreck=new THREE.MeshStandardMaterial({color:0x2a2626,roughness:0.85,metalness:0.25});
+      HI.ready=true;
+    }catch(e){hiFail(e);return;}
+    for(const [o,up] of HI.pending)if(o.g.parent)hiAdd(o,up);
+    HI.pending.length=0;
+  },undefined,hiFail);
+}
+function hiPaint(hex){
+  return HI.paints[hex]||(HI.paints[hex]=new THREE.MeshPhysicalMaterial({color:hex,roughness:0.3,metalness:0.35,clearcoat:0.9,clearcoatRoughness:0.06}));
+}
+function hiCar(car){
+  if(car.hi)return;
+  const T=HI.cars[HI_CAR[car.m.key]],X=T.x,s=car.m.len/X.length,body=new THREE.Group(),red=T.red.clone(),paint=[];
+  body.scale.setScalar(s);                                   // the model scaled to the game car's length
+  for(const q of T.body.parts){
+    const m=new THREE.Mesh(q.geo,q.name==='RedLens'?red:q.mat);
+    m.castShadow=!q.mat.transparent;m.receiveShadow=true;
+    if(q.name==='Paint')paint.push(m);
+    body.add(m);
+  }
+  const wheels=car.wheels.map(w=>{
+    const piv=w.parent===car.g?w:w.parent,sx=piv.position.x<0?-1:1,g=new THREE.Group();
+    g.scale.set(sx*s,s,s);                                   // the model's wheel is the left (+x) one: mirrored for the right
+    for(const q of T.wheel.parts){const m=new THREE.Mesh(q.geo,q.mat);m.castShadow=true;g.add(m);}
+    return [w,piv,sx,g];
+  });
+  // swap: the simple body, lamps and doors stop drawing (they keep working underneath), the wheels move to the model's axles
+  const tail=car.bodyG.children.find(o=>o.material===car.tailMat);
+  car.bodyG.add(body);
+  car.body.visible=false;if(tail)tail.visible=false;car.bodyG.remove(car.gm);
+  for(const d of car.doors)d.h.visible=false;
+  for(const [w,piv,sx,g] of wheels){
+    piv.position.set(sx*X.track*s,X.wheel_r*s,(piv===w?X.wheels_rear:X.wheels_front)*s);
+    w.geometry=HI.empty;w.add(g);
+  }
+  car.hi={body,paint,red,paintMat:null};
+  hiCarSync(car);
+}
+function hiCarSync(car){ // paint follows the car's colour (respray, wreck); the tail lights follow the brake lights
+  const h=car.hi,want=car.type==='wreck'?HI.wreck:hiPaint(car.doorMat.color.getHex());
+  if(h.paintMat!==want){h.paintMat=want;for(const m of h.paint)m.material=want;}
+  h.red.emissiveIntensity=car.tailMat.color.r>0.9?2.4:0.3;
+}
+function hiPerson(p){
+  if(p.hi)return;
+  const female=Math.random()<0.45,pool=HI.people.filter(v=>v.female===female),V=pick(pool.length?pool:HI.people);
+  const S=HI.PS,B=p.boxes,shadow=p.torso.castShadow,pairs=[];
+  // B: torso, head, hair, legL, legR, armL, armR, handL, handR. Skin, shirt, trousers and hair take the person's
+  // own materials, so outfit changes and multiplayer colours keep working.
+  const scalps=[];
+  const build=(T,src)=>{
+    const g=new THREE.Group();g.scale.setScalar(S);
+    for(const q of T.parts){
+      const b=src[q.name],m=new THREE.Mesh(q.geo,b?b.material:q.name==='Scalp'?hiScalp(B[1].material,B[2].material):q.mat);
+      m.castShadow=shadow;m.receiveShadow=true;if(b)pairs.push([m,b]);if(q.name==='Scalp')scalps.push(m);g.add(m);
+    }
+    return g;
+  };
+  const tg=build(V.torso,{Skin:B[1],Shirt:B[0],Pants:B[3],Hair:B[2]});
+  tg.position.y=-p.torso.position.y;                         // the torso group pivots at the chest; the model stands on the ground
+  // each limb group moves to the model's joint; the game's armL/legL sit at -x, the model's right side
+  const limbs=[[p.armL,V.armR,{Skin:B[7],Shirt:B[5]}],[p.armR,V.armL,{Skin:B[8],Shirt:B[6]}],[p.legL,V.legR,{Pants:B[3]}],[p.legR,V.legL,{Pants:B[4]}]];
+  const lg=limbs.map(([,T,src])=>build(T,src));
+  p.torso.add(tg);
+  // a ball of shirt in each shoulder joint, hidden while the arm hangs, closes the joint when the arm is raised
+  HI.unit=HI.unit||new THREE.SphereGeometry(1,16,12);
+  for(const T of [V.armL,V.armR]){
+    const j=T.x.joint,b=new THREE.Mesh(HI.unit,B[0].material);
+    b.scale.setScalar(S*(V.torso.x.shoulder_r||0.035));b.position.set(j[0]*S,j[1]*S-p.torso.position.y,j[2]*S);pairs.push([b,B[0]]);tg.parent.add(b);
+  }
+  // cloth cores inside the chest and hips: the small openings at the joints while the limbs swing show cloth
+  for(const [k,b] of [['core_top',B[0]],['core_hips',B[3]]]){
+    const c=V.torso.x[k];if(!c)continue;
+    const m=new THREE.Mesh(HI.unit,b.material);m.position.set(c[0],c[1],c[2]);m.scale.set(c[3],c[4],c[5]);
+    pairs.push([m,b]);tg.add(m);
+  }
+  limbs.forEach(([grp,T],i)=>{
+    const j=T.x.joint,h=T.x.hand;grp.position.set(j[0]*S,j[1]*S,j[2]*S);
+    if(h){ // guns, phones and food hang at y≈-0.8 under the old arm: move them, now and when added later, to this hand
+      const off=new THREE.Vector3(h[0]*S,h[1]*S+0.8,h[2]*S),add=grp.add;
+      for(const o of grp.children)if(!B.includes(o))o.position.add(off);
+      grp.add=function(...o){for(const q of o)q.position.add(off);return add.apply(this,o);};
+    }
+    THREE.Object3D.prototype.add.call(grp,lg[i]);
+  });
+  for(const b of B)b.geometry=HI.empty;
+  p.hi={pairs,scalps,skin:B[1],hairBox:B[2],female};
+}
+function hiPersonSync(p){
+  const h=p.hi;
+  for(const [m,b] of h.pairs)if(m.material!==b.material)m.material=b.material;
+  if(h.scalps.length&&(h.sm!==h.skin.material||h.hm!==h.hairBox.material)){ // skin or hair changed (new outfit)
+    h.sm=h.skin.material;h.hm=h.hairBox.material;const want=hiScalp(h.sm,h.hm);for(const m of h.scalps)m.material=want;
+  }
+}
+// skin with close-cropped hair: the model's UV u is the height above the hairline (blender/export_game_assets.py);
+// the hairline is drawn per pixel, soft by about a pixel, between the person's skin and hair colours
+function hiScalp(skin,hair){
+  const k=skin.color.getHex()+'|'+hair.color.getHex();
+  if(HI.scalps[k])return HI.scalps[k];
+  const m=new THREE.MeshStandardMaterial({color:skin.color.clone(),roughness:0.6});
+  m.defines={USE_UV:''};m.extensions={derivatives:true};
+  const hc={value:hair.color.clone()};
+  m.onBeforeCompile=sh=>{
+    sh.uniforms.hairColor=hc;
+    sh.fragmentShader='uniform vec3 hairColor;\n'+sh.fragmentShader.replace('#include <color_fragment>',
+      'float hw=max(fwidth(vUv.x),0.0004);diffuseColor.rgb=mix(diffuse,hairColor,smoothstep(-hw,hw,vUv.x));');
+  };
+  m.customProgramCacheKey=()=>'hi-scalp';
+  return HI.scalps[k]=m;
 }
 const TRAFFIC_MIX=['sedan','sedan','sedan','sedan','suv','suv','suv','taxi','taxi','van','van','pickup','pickup','sport'];
 function spawnTraffic(minD,model){
@@ -3384,6 +3552,7 @@ function carVisuals(car,dt){
     const beat=Math.floor(gameTime*2.5);
     if(beat!==car.lastBeep){car.lastBeep=beat;const pp=P(),d=dist(car.x,car.z,pp.x,pp.z);if(d<70)blip(beat%2?520:420,0.16,'square',0.06*(1-d/70));}
   }
+  if(car.hi)hiCarSync(car);
   // damage smoke and fire
   const r=car.hp/car.maxHp,fx=Math.sin(car.a),fz=Math.cos(car.a),hx=car.x+fx*(car.m.len/2-0.7),hz=car.z+fz*(car.m.len/2-0.7),hy=car.y+car.m.clear+(car.m.van?1.0:car.m.bh)+0.2;
   if(car.type==='wreck'){
@@ -4817,8 +4986,9 @@ function startGame(){
 if(isTouch)document.body.classList.add('touch');
 $('start').addEventListener('click',startGame);
 requestAnimationFrame(frame);
+hiLoad();
 
 // test hook for automated checks
-window.__game={get busStops(){return busStops;},get walkHeads(){return walkHeads;},walkState,mpUpsert,get mp(){return mp;},eatFood,buyItem,doorPointAt,get player(){return player;},get cars(){return cars;},get peds(){return peds;},get money(){return money;},get stars(){return stars();},get mission(){return mission;},get state(){return state;},get jobPos(){return jobPos;},get shops(){return shops;},get slots(){return slots;},get crossings(){return crossings;},get homeDoors(){return homeDoors;},lightState,startRobbery,unarmedRob,toggleMap,get mapOpen(){return mapOpen;},get gameTime(){return gameTime;},navMove,shootPed(p){bulletPed(p,WEAPONS.rifle,Math.atan2(p.x-player.x,p.z-player.z),p.x,p.y+1.3,p.z);},setHeat(v){heat=Math.max(0,v);heatT=0;},onAimedAt,shopAction,lockpickTry,smashWindow,startReload,setAim(v){rightDown=v;},setPitch(v){camPitch=v;},raycast3D,makeCar,camera,scene,renderer,selectWeapon,fireWeapon,hurtPlayer,get camYaw(){return camYaw;},setMoney(v){money=v;},free,start:startGame,setYaw(v){camYaw=v;camInit=false;},step(n){setPaused(false);for(let i=0;i<n;i++)update(1/60);renderer.render(scene,camera);},keys,toggleCar,addHeat,punch,damageCar};
+window.__game={get hi(){return HI;},get busStops(){return busStops;},get walkHeads(){return walkHeads;},walkState,mpUpsert,get mp(){return mp;},eatFood,buyItem,doorPointAt,get player(){return player;},get cars(){return cars;},get peds(){return peds;},get money(){return money;},get stars(){return stars();},get mission(){return mission;},get state(){return state;},get jobPos(){return jobPos;},get shops(){return shops;},get slots(){return slots;},get crossings(){return crossings;},get homeDoors(){return homeDoors;},lightState,startRobbery,unarmedRob,toggleMap,get mapOpen(){return mapOpen;},get gameTime(){return gameTime;},navMove,shootPed(p){bulletPed(p,WEAPONS.rifle,Math.atan2(p.x-player.x,p.z-player.z),p.x,p.y+1.3,p.z);},setHeat(v){heat=Math.max(0,v);heatT=0;},onAimedAt,shopAction,lockpickTry,smashWindow,startReload,setAim(v){rightDown=v;},setPitch(v){camPitch=v;},raycast3D,makeCar,camera,scene,renderer,selectWeapon,fireWeapon,hurtPlayer,get camYaw(){return camYaw;},setMoney(v){money=v;},free,start:startGame,setYaw(v){camYaw=v;camInit=false;},step(n){setPaused(false);for(let i=0;i<n;i++)update(1/60);renderer.render(scene,camera);},keys,toggleCar,addHeat,punch,damageCar};
 })();
 </script>
