@@ -1,0 +1,185 @@
+{
+ "body_faces_hidden": 9679,
+ "check_rest": {
+  "body>Socks_L": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "body>Socks_R": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "body>Jeans": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "body>TShirt": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "body>Shoe_L": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "body>Shoe_R": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "TShirt>Jeans": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "Jeans>Socks_L": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "Jeans>Shoe_L": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "Shoe_L>Socks_L": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "Jeans>Socks_R": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "Jeans>Shoe_R": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "Shoe_R>Socks_R": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "ShoeCollar_L>Socks_L": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "Laces_L>Socks_L": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "ShoeCollar_R>Socks_R": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "Laces_R>Socks_R": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "folds:Socks_L": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "folds:Socks_R": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "folds:Jeans": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "folds:TShirt": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "folds:Shoe_L": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "folds:Shoe_R": {
+   "points": 0,
+   "worst_mm": 0.0
+  }
+ },
+ "check_walk": {
+  "body>Socks_L": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "body>Socks_R": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "body>Jeans": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "body>TShirt": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "body>Shoe_L": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "body>Shoe_R": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "TShirt>Jeans": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "Jeans>Socks_L": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "Jeans>Shoe_L": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "Shoe_L>Socks_L": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "Jeans>Socks_R": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "Jeans>Shoe_R": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "Shoe_R>Socks_R": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "ShoeCollar_L>Socks_L": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "Laces_L>Socks_L": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "ShoeCollar_R>Socks_R": {
+   "points": 0,
+   "worst_mm": 0.0
+  },
+  "Laces_R>Socks_R": {
+   "points": 0,
+   "worst_mm": 0.0
+  }
+ },
+ "lifted_by_m": 0.0259,
+ "objects": {
+  "Eyelets_L": 200,
+  "Eyelets_R": 200,
+  "Jeans": 7459,
+  "Laces_L": 864,
+  "Laces_R": 864,
+  "m_ca01": 19907,
+  "Shoe_L": 7951,
+  "Shoe_R": 7962,
+  "ShoeCollar_L": 1600,
+  "ShoeCollar_R": 1630,
+  "Socks_L": 726,
+  "Socks_R": 723,
+  "Sole_L": 768,
+  "Sole_R": 768,
+  "TShirt": 6121
+ }
+}
