@@ -669,6 +669,27 @@ def gh_surface(name, mat, root, x0, x1, v0, v1, nx, nv, offset=0.0):
     return mesh_obj(name, bm, [mat], parent=root, smooth=True)
 
 
+def gh_shell(name, mat, root, holes, nx=64, nv=40):
+    """The greenhouse surface with rectangular (x, v) openings; grid lines are placed on the opening edges."""
+    g = GH
+    xs = sorted(set([lerp(g['xr0'], g['xf0'], i / nx) for i in range(nx + 1)] + [h[0] for h in holes] + [h[1] for h in holes]))
+    vs = sorted(set([j / nv for j in range(nv + 1)] + [h[2] for h in holes] + [h[3] for h in holes]))
+    bm = bmesh.new()
+    grid = [[bm.verts.new(gh_point(x, v)) for v in vs] for x in xs]
+    for i in range(len(xs) - 1):
+        for j in range(len(vs) - 1):
+            xc, vc = (xs[i] + xs[i + 1]) / 2, (vs[j] + vs[j + 1]) / 2
+            if any(h[0] < xc < h[1] and h[2] < vc < h[3] for h in holes):
+                continue
+            bm.faces.new((grid[i][j], grid[i + 1][j], grid[i + 1][j + 1], grid[i][j + 1]))
+    bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context='VERTS')
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    centre = Vector((0, 0, GH['zb'] + 0.1))
+    if sum(1 for f in bm.faces if f.normal.dot(f.calc_center_median() - centre) < 0) > len(bm.faces) / 2:
+        bmesh.ops.reverse_faces(bm, faces=bm.faces)
+    return mesh_obj(name, bm, [mat], parent=root, smooth=True)
+
+
 def decal(name, body, mat, root, origin_fn, direction, nu, nv, offset=0.004, mask=None):
     """Project a grid of rays onto the evaluated body and build a thin skin that sits exactly on it.
     origin_fn(u, v) -> ray origin (body space) for u, v in [0, 1]."""
@@ -707,7 +728,7 @@ def body_hit(body, origin, direction):
     return (loc, nor) if hit else (None, None)
 
 
-def car(name, color, loc, rot_z, lights_on=True):
+def car(name, color, loc, rot_z):
     root = empty(name, loc, rot_z)
     paint = principled(name + '_Paint', srgb(color), rough=0.3, metal=0.55, coat=1.0, coat_rough=0.02)
     mats = {
@@ -718,15 +739,20 @@ def car(name, color, loc, rot_z, lights_on=True):
         'disc': principled(name + '_Disc', srgb('#5d5f63'), rough=0.3, metal=1.0),
         'caliper': principled(name + '_Caliper', srgb('#b0201c'), rough=0.35),
     }
-    glass = principled(name + '_Glass', srgb('#0a0d11'), rough=0.015, ior=1.52, spec=1.0)
-    on = 1.0 if lights_on else 0.0
-    head_housing = principled(name + '_HeadHousing', srgb('#2a2d33'), rough=0.12, metal=1.0)      # chrome-grey reflector bowl
-    projector = principled(name + '_Projector', srgb('#dfe8ff'), rough=0.02, emit=srgb('#f4f7ff'), emit_str=6.0 * on, spec=1.0)
-    projector_ring = principled(name + '_ProjRing', srgb('#c9ced6'), rough=0.08, metal=1.0)
-    drl = principled(name + '_DRL', srgb('#ffffff'), rough=0.1, emit=srgb('#eef4ff'), emit_str=20.0 * on)
-    tail_lens = principled(name + '_TailLens', srgb('#6e0b0b'), rough=0.04, emit=srgb('#b0100a'), emit_str=0.6 * on, spec=1.0)
-    tail_led = principled(name + '_TailLED', srgb('#ff3020'), rough=0.1, emit=srgb('#ff1a0a'), emit_str=14.0 * on)
-    reverse = principled(name + '_Reverse', srgb('#9aa0a8'), rough=0.03, metal=0.8, spec=1.0)
+    def clear_glass(nm, tint, rough=0.0):
+        m = principled(nm, srgb(tint), rough=rough, ior=1.5, spec=1.0)
+        m.node_tree.nodes['Principled BSDF'].inputs['Transmission Weight'].default_value = 1.0
+        return m
+    glass = clear_glass(name + '_Glass', '#7d8a8c')                 # lightly tinted window glass, see-through
+    cover = clear_glass(name + '_LampCover', '#f4f6f8')             # clear polycarbonate lamp cover
+    red_glass = clear_glass(name + '_RedGlass', '#c0140c', 0.02)   # tail-light lens
+    amber_glass = clear_glass(name + '_AmberGlass', '#ff8a1c', 0.05)
+    lamp_black = principled(name + '_LampBlack', srgb('#0c0d0f'), rough=0.08, spec=1.0)      # gloss-black housing
+    reflector = principled(name + '_Reflector', srgb('#e6e9ee'), rough=0.06, metal=1.0)     # chrome reflector
+    light_guide = principled(name + '_LightGuide', srgb('#dcdfe3'), rough=0.35, spec=0.6)   # unlit frosted strip
+    proj_lens = principled(name + '_ProjLens', srgb('#05070a'), rough=0.0, ior=1.5, spec=1.0)
+    interior = principled(name + '_Interior', srgb('#1d1c1e'), rough=0.55)
+    dash = principled(name + '_Dash', srgb('#141416'), rough=0.4)
     liner_mat = textured(name + '_Liner', 'plaster', srgb('#1c1c1e'), srgb('#26262a'), rough=0.8, bump=0.6)
     grille = principled(name + '_Grille', srgb('#0b0b0c'), rough=0.25, metal=0.3)
     seam = principled(name + '_Seam', srgb('#050505'), rough=0.8)
@@ -781,15 +807,48 @@ def car(name, color, loc, rot_z, lights_on=True):
     mesh_obj(name + '_Liner', lbm, [liner_mat], parent=root)
     bpy.context.view_layer.update()
 
-    # ---- cabin: one painted shell (roof and pillars) with glass set into it
+    # ---- cabin: a painted shell (roof and pillars) with real window openings, clear glass and an interior
+    from mathutils import Matrix
     g = GH
-    gh_surface(name + '_Cabin', paint, root, g['xr0'], g['xf0'], 0.0, 1.0, 64, 40)
-    off = 0.006
-    gh_surface(name + '_Windscreen', glass, root, g['xf1'] + 0.03, g['xf0'] - 0.07, 0.17, 0.83, 24, 24, off)
-    gh_surface(name + '_RearWindow', glass, root, g['xr0'] + 0.08, g['xr1'] - 0.03, 0.2, 0.8, 20, 24, off)
-    for (v0, v1) in ((0.035, 0.205), (0.795, 0.965)):            # side windows, split by the B-pillar
-        gh_surface(name + '_SideFront', glass, root, -0.22, g['xf0'] - 0.16, v0, v1, 28, 8, off)
-        gh_surface(name + '_SideRear', glass, root, g['xr0'] + 0.22, -0.34, v0, v1, 24, 8, off)
+    # windscreen and rear window sit between the roof rails; the side windows stop below the rails, with
+    # A-, B- and C-pillars between the openings
+    windows = [(g['xf1'] + 0.06, g['xf0'] - 0.07, 0.24, 0.76), (g['xr0'] + 0.1, g['xr1'] - 0.06, 0.26, 0.74)]
+    for (v0, v1) in ((0.035, 0.185), (0.815, 0.965)):
+        windows += [(-0.2, g['xf0'] - 0.2, v0, v1), (g['xr0'] + 0.3, -0.36, v0, v1)]
+    gh_shell(name + '_Cabin', paint, root, windows)
+    for k, (x0, x1, v0, v1) in enumerate(windows):
+        gh_surface(name + '_Window%d' % k, glass, root, x0, x1, v0, v1, 24, 16)
+    ibm = bmesh.new()
+    bm_box(ibm, -1.1, -0.7, 0.93, 0.45, 0.7, 0.975, 0)                # floor / door cards inside the belt line
+    bm_box(ibm, 0.3, -0.66, 0.95, 0.52, 0.66, 1.04, 1)                # dashboard
+    for sy in (-0.38, 0.38):                                         # front seats: cushion, backrest, headrest
+        bm_box(ibm, -0.25, sy - 0.24, 0.95, 0.18, sy + 0.24, 1.02, 0)
+        bm_hex(ibm, [(-0.34, sy - 0.25, 0.99), (-0.2, sy - 0.25, 0.99), (-0.2, sy + 0.25, 0.99), (-0.34, sy + 0.25, 0.99),
+                     (-0.44, sy - 0.24, 1.3), (-0.33, sy - 0.24, 1.3), (-0.33, sy + 0.24, 1.3), (-0.44, sy + 0.24, 1.3)], 0)
+        bm_box(ibm, -0.44, sy - 0.13, 1.31, -0.34, sy + 0.13, 1.38, 0)
+    bm_box(ibm, -1.0, -0.66, 0.95, -0.65, 0.66, 1.0, 0)               # rear bench
+    bm_hex(ibm, [(-1.06, -0.66, 0.98), (-0.94, -0.66, 0.98), (-0.94, 0.66, 0.98), (-1.06, 0.66, 0.98),
+                 (-1.1, -0.64, 1.12), (-1.0, -0.64, 1.12), (-1.0, 0.64, 1.12), (-1.1, 0.64, 1.12)], 0)
+    mesh_obj(name + '_Interior', ibm, [interior, dash], parent=root, bevel=0.02)
+    # steering wheel: a rim swept around its column, tilted toward the driver
+    swb = bmesh.new()
+    rim = []
+    for k in range(40):
+        th = k / 40 * 2 * math.pi
+        ring = []
+        for j in range(10):
+            ph = j / 10 * 2 * math.pi
+            r = 0.17 + 0.018 * math.sin(ph)
+            ring.append(swb.verts.new((0.018 * math.cos(ph), r * math.cos(th), r * math.sin(th))))
+        rim.append(ring)
+    for k in range(40):
+        a, b = rim[k], rim[(k + 1) % 40]
+        for j in range(10):
+            swb.faces.new((a[j], a[(j + 1) % 10], b[(j + 1) % 10], b[j]))
+    bmesh.ops.recalc_face_normals(swb, faces=swb.faces)
+    bmesh.ops.rotate(swb, verts=swb.verts, cent=(0, 0, 0), matrix=Matrix.Rotation(math.radians(-25), 3, 'Y'))
+    bmesh.ops.translate(swb, verts=swb.verts, vec=(0.28, 0.38, 1.1))
+    mesh_obj(name + '_SteeringWheel', swb, [dash], parent=root, smooth=True)
     # wipers at the base of the windscreen
     wb = bmesh.new()
     for yy in (-0.05, 0.42):
@@ -800,36 +859,58 @@ def car(name, color, loc, rot_z, lights_on=True):
     # ---- parts projected onto the real body surface
     S = name + '_'
     for s in (1, -1):
-        # ---- headlight unit (like a modern LED lamp): reflector housing, two projector lenses with
-        # chrome rings and an LED daytime-running strip along the top edge
-        def lamp_origin(u, v, w, h, z0, rise, s=s):
-            yy = s * (0.37 + u * w)                     # u = 0 inner end, u = 1 outer corner
-            return (4.0, yy, z0 + rise * u + v * (h - 0.02 * u))
-        decal(S + 'HeadHousing', body, head_housing, root, lambda u, v: lamp_origin(u, v, 0.46, 0.11, 0.565, 0.025), (-1, 0, 0), 64, 14, 0.003)
-        decal(S + 'DRL', body, drl, root, lambda u, v: lamp_origin(0.03 + u * 0.94, 0.8 + v * 0.1, 0.46, 0.11, 0.565, 0.025), (-1, 0, 0), 64, 2, 0.008)
-        for pu in (0.3, 0.66):                           # projector lenses
-            o = lamp_origin(pu, 0.4, 0.46, 0.11, 0.565, 0.025)
-            p, n = body_hit(body, o, (-1, 0, 0))
-            if p is None:
-                continue
+        # ---- headlight (unlit), modelled on a modern swept lamp: a silver frame, a gloss-black housing,
+        # a chrome reflector bowl with a projector, an amber indicator at the inner tip, a frosted light
+        # guide along the top edge, all under a clear glass cover. It wraps around the front corner and
+        # stays clear of the grille and the number plate.
+        hd = (-1.0, -s * 0.35, 0.0)
+
+        def head_pt(u, v, grow=0.0, s=s):
+            u = -grow + u * (1 + 2 * grow)
+            v = -grow * 2 + v * (1 + 4 * grow)
+            uu = min(1.0, max(0.0, u))
+            h = 0.03 + 0.09 * math.sin(math.pi * min(1.0, uu * 1.12)) ** 0.7
+            x = 2.36 - 0.32 * uu ** 2
+            y = s * (0.5 + 0.42 * u)
+            z = 0.6 + 0.05 * uu ** 1.6 + v * h
+            return (x + 3.0, y + s * 3.0 * 0.35, z)          # start 3 m back along the ray
+        decal(S + 'HeadFrame', body, reflector, root, lambda u, v: head_pt(u, v, 0.03), hd, 64, 14, 0.003)
+        decal(S + 'HeadHousing', body, lamp_black, root, head_pt, hd, 64, 14, 0.006)
+        decal(S + 'HeadReflector', body, reflector, root, lambda u, v: head_pt(0.45 + u * 0.4, 0.12 + v * 0.62), hd, 30, 12, 0.009)
+        decal(S + 'HeadGuide', body, light_guide, root, lambda u, v: head_pt(0.04 + u * 0.92, 0.8 + v * 0.14), hd, 64, 3, 0.011)
+        decal(S + 'Indicator', body, amber_glass, root, lambda u, v: head_pt(0.06 + u * 0.24, 0.18 + v * 0.5), hd, 16, 6, 0.011)
+        p, n = body_hit(body, head_pt(0.65, 0.42), hd)
+        if p is not None:
+            dn = Vector(hd).normalized()
+            rot = (-dn).to_track_quat('Z', 'Y').to_matrix().to_4x4()
             pbm = bmesh.new()
-            ring = bmesh.ops.create_cone(pbm, cap_ends=False, segments=32, radius1=0.034, radius2=0.03, depth=0.016)
-            bmesh.ops.rotate(pbm, verts=ring['verts'], cent=(0, 0, 0), matrix=__import__('mathutils').Matrix.Rotation(math.pi / 2, 3, 'Y'))
-            bmesh.ops.translate(pbm, verts=ring['verts'], vec=p + Vector((0.006, 0, 0)))
-            mesh_obj(S + 'ProjRing', pbm, [projector_ring], parent=root, smooth=True)
+            ret = bmesh.ops.create_cone(pbm, cap_ends=False, segments=32, radius1=0.05, radius2=0.032, depth=0.03)   # chrome bowl
+            bmesh.ops.transform(pbm, verts=ret['verts'], matrix=rot)
+            bmesh.ops.translate(pbm, verts=ret['verts'], vec=p - dn * 0.024)
+            mesh_obj(S + 'ProjBowl', pbm, [reflector], parent=root, smooth=True)
             lbm2 = bmesh.new()
-            dome = bmesh.ops.create_uvsphere(lbm2, u_segments=24, v_segments=12, radius=0.028)
-            bmesh.ops.scale(lbm2, verts=dome['verts'], vec=(0.45, 1, 1))
-            bmesh.ops.translate(lbm2, verts=dome['verts'], vec=p + Vector((0.004, 0, 0)))
-            mesh_obj(S + 'Projector', lbm2, [projector], parent=root, smooth=True)
-        # ---- tail light unit: dark housing, deep-red lens, two bright LED bars, a reverse lamp
-        def tail_origin(u, v, s=s):
-            return (-4.0, s * (0.34 + u * 0.44), 0.7 + v * 0.085 - 0.01 * u)
-        decal(S + 'TailHousing', body, head_housing, root, tail_origin, (1, 0, 0), 56, 10, 0.003)
-        decal(S + 'TailLens', body, tail_lens, root, lambda u, v: tail_origin(0.22 + u * 0.78, v), (1, 0, 0), 36, 8, 0.006)
-        for vb in (0.25, 0.72):
-            decal(S + 'TailLED', body, tail_led, root, lambda u, v, vb=vb: tail_origin(0.26 + u * 0.7, vb + v * 0.08), (1, 0, 0), 36, 1, 0.009)
-        decal(S + 'Reverse', body, reverse, root, lambda u, v: tail_origin(u * 0.2, v), (1, 0, 0), 8, 8, 0.006)
+            ret = bmesh.ops.create_uvsphere(lbm2, u_segments=24, v_segments=12, radius=0.03)
+            bmesh.ops.scale(lbm2, verts=ret['verts'], vec=(1, 1, 0.6))
+            bmesh.ops.transform(lbm2, verts=ret['verts'], matrix=rot)
+            bmesh.ops.translate(lbm2, verts=ret['verts'], vec=p - dn * 0.02)
+            mesh_obj(S + 'ProjLens', lbm2, [proj_lens], parent=root, smooth=True)
+        decal(S + 'HeadCover', body, cover, root, lambda u, v: head_pt(u, v, 0.02), hd, 64, 14, 0.04)
+        # ---- tail light (unlit): gloss-black frame, chrome reflector behind deep-red glass, and a
+        # clear-glass reverse lamp at the inner end
+        td = (1.0, -s * 0.3, 0.0)
+
+        def tail_pt(u, v, grow=0.0, s=s):
+            u = -grow + u * (1 + 2 * grow)
+            v = -grow * 2 + v * (1 + 4 * grow)
+            uu = min(1.0, max(0.0, u))
+            x = -2.36 + 0.2 * uu ** 2
+            y = s * (0.38 + 0.46 * u)
+            z = 0.69 + v * (0.1 - 0.02 * uu) - 0.01 * uu
+            return (x - 3.0, y + s * 3.0 * 0.3, z)
+        decal(S + 'TailFrame', body, lamp_black, root, lambda u, v: tail_pt(u, v, 0.03), td, 56, 10, 0.003)
+        decal(S + 'TailReflector', body, reflector, root, tail_pt, td, 56, 10, 0.006)
+        decal(S + 'TailRed', body, red_glass, root, lambda u, v: tail_pt(0.22 + u * 0.78, v), td, 44, 10, 0.03)
+        decal(S + 'Reverse', body, cover, root, lambda u, v: tail_pt(u * 0.21, v), td, 10, 10, 0.03)
         # side skirt, door handles
         decal(S + 'Skirt', body, mats['dark'], root, lambda u, v, s=s: (-1.0 + u * 2.0, s * 3.0, 0.3 + v * 0.07), (0, -s, 0), 40, 3, 0.004)
         for hx in (0.25, -0.62):
@@ -843,13 +924,12 @@ def car(name, color, loc, rot_z, lights_on=True):
     decal(S + 'Seam', body, seam, root, lambda u, v: (0.98 + v * 0.008, -0.74 + u * 1.48, 3.0), (0, 0, -1), 30, 1, 0.002)   # hood rear edge
     decal(S + 'Seam', body, seam, root, lambda u, v: (-1.5 + v * 0.008, -0.74 + u * 1.48, 3.0), (0, 0, -1), 30, 1, 0.002)  # trunk front edge
     # grille, lower intake, number plates, rear diffuser
-    decal(S + 'GrilleFrame', body, mats['chrome'], root, lambda u, v: (4.0, -0.43 + u * 0.86, 0.5 + v * 0.17), (-1, 0, 0), 24, 6, 0.004)
-    decal(S + 'Grille', body, grille, root, lambda u, v: (4.0, -0.4 + u * 0.8, 0.515 + v * 0.14), (-1, 0, 0), 24, 6, 0.007)
-    decal(S + 'Intake', body, grille, root, lambda u, v: (4.0, -0.62 + u * 1.24, 0.33 + v * 0.1), (-1, 0, 0), 30, 4, 0.004)
-    decal(S + 'PlateF', body, plate, root, lambda u, v: (4.0, -0.25 + u * 0.5, 0.37 + v * 0.11), (-1, 0, 0), 10, 3, 0.012)
+    decal(S + 'GrilleFrame', body, mats['chrome'], root, lambda u, v: (4.0, -0.4 + u * 0.8, 0.51 + v * 0.15), (-1, 0, 0), 24, 6, 0.004)
+    decal(S + 'Grille', body, grille, root, lambda u, v: (4.0, -0.375 + u * 0.75, 0.525 + v * 0.12), (-1, 0, 0), 24, 6, 0.007)
+    decal(S + 'Intake', body, grille, root, lambda u, v: (4.0, -0.62 + u * 1.24, 0.31 + v * 0.07), (-1, 0, 0), 30, 3, 0.004)
+    decal(S + 'PlateF', body, plate, root, lambda u, v: (4.0, -0.25 + u * 0.5, 0.395 + v * 0.1), (-1, 0, 0), 10, 3, 0.012)
     decal(S + 'PlateR', body, plate, root, lambda u, v: (-4.0, -0.25 + u * 0.5, 0.5 + v * 0.11), (1, 0, 0), 10, 3, 0.008)
     decal(S + 'Diffuser', body, mats['dark'], root, lambda u, v: (-4.0, -0.8 + u * 1.6, 0.33 + v * 0.13), (1, 0, 0), 30, 4, 0.004)
-    decal(S + 'TailBar', body, tail_led, root, lambda u, v: (-4.0, -0.34 + u * 0.68, 0.755 + v * 0.012), (1, 0, 0), 40, 1, 0.006)
     # exhaust tips, placed at the rear surface
     ebm = bmesh.new()
     for s in (1, -1):
@@ -1032,8 +1112,9 @@ CAR_STUDIO = [
     ('car_side', (0.0, -7.5, 0.9), (0.0, 0, 0.65), 50, None),
     ('car_top', (3.2, -3.4, 4.2), (0.0, 0, 0.6), 40, None),
     ('car_wheel', (2.4, -2.3, 0.5), (1.42, -0.79, 0.34), 60, None),
-    ('car_headlight', (3.6, -1.6, 0.85), (2.3, -0.55, 0.66), 70, None),
-    ('car_taillight', (-3.7, -1.7, 1.0), (-2.3, -0.55, 0.82), 70, None),
+    ('car_headlight', (3.4, -1.9, 0.85), (2.2, -0.7, 0.66), 70, None),
+    ('car_taillight', (-3.5, -1.9, 0.95), (-2.25, -0.6, 0.74), 70, None),
+    ('car_interior', (1.2, -2.6, 1.45), (-0.3, 0.0, 1.05), 45, None),
 ]
 
 
