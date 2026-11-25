@@ -642,8 +642,10 @@ function makePerson(o){
   body.add(build(V.torso));
   UNIT=UNIT||new THREE.SphereGeometry(1,16,12);
   // shirt balls in the shoulders and cloth cores in the chest and hips close the joints while the limbs swing
-  for(const T of [V.armL,V.armR]){const j=T.x.joint,b=new THREE.Mesh(UNIT,M.Shirt);b.scale.setScalar(V.torso.x.shoulder_r||0.03);b.position.set(j[0],j[1],j[2]);body.add(b);}
-  for(const [k,mt] of [['core_top',M.Shirt],['core_hips',M.Pants]]){const c=V.torso.x[k];if(!c)continue;const m=new THREE.Mesh(UNIT,mt);m.position.set(c[0],c[1],c[2]);m.scale.set(c[3],c[4],c[5]);body.add(m);}
+  // (matte, without sky reflections: where a sphere peeks out at a grazing angle it must not light up)
+  const matte=(hex)=>matC[hex+'|matte']||(matC[hex+'|matte']=new THREE.MeshStandardMaterial({color:lc(hex),roughness:1,envMapIntensity:0.15}));
+  for(const T of [V.armL,V.armR]){const j=T.x.joint,b=new THREE.Mesh(UNIT,matte(shirt));b.scale.setScalar((V.torso.x.shoulder_r||0.03)*0.85);b.position.set(j[0],j[1],j[2]);body.add(b);}
+  for(const [k,mt] of [['core_top',matte(shirt)],['core_hips',matte(pants)]]){const c=V.torso.x[k];if(!c)continue;const m=new THREE.Mesh(UNIT,mt);m.position.set(c[0],c[1],c[2]);m.scale.set(c[3],c[4],c[5]);body.add(m);}
   const limb=T=>{const grp=new THREE.Group(),j=T.x.joint;grp.position.set(j[0],j[1],j[2]);grp.add(build(T));body.add(grp);return grp;};
   const p={g,body,armL:limb(V.armL),armR:limb(V.armR),legL:limb(V.legL),legR:limb(V.legR),phase:Math.random()*6,female,
     colors:{skin,hair,shirt,pants,female},hip:V.legL.x.joint[1]};
