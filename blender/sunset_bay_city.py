@@ -860,6 +860,51 @@ def decal(name, body, mat, root, origin_fn, direction, nu, nv, offset=0.004, mas
     return mesh_obj(name, bm, [mat], parent=root, smooth=True)
 
 
+def side_seam(name, body, root, mat, s, pts, width=0.007, off=0.002):
+    """A door shut line on the body side (side s) along a path of (x, z) points."""
+    segs = list(zip(pts[:-1], pts[1:]))
+    lens = [math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in segs]
+    total = sum(lens)
+
+    def at(u):
+        d = u * total
+        for i, ((a, b), L) in enumerate(zip(segs, lens)):
+            if d <= L or i == len(segs) - 1:
+                t = 0.0 if L == 0 else min(1.0, d / L)
+                return a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, (b[0] - a[0]) / L, (b[1] - a[1]) / L
+            d -= L
+
+    def origin(u, v):
+        px, pz, tx, tz = at(u)
+        w = (v - 0.5) * width
+        return (px - tz * w, s * 3.0, pz + tx * w)
+    return decal(name, body, mat, root, origin, (0, -s, 0), max(2, int(total / 0.015)), 1, off)
+
+
+def arch_path(cx, cz, r, a0, a1, n=8):
+    """Points on a circle around a wheel arch, from angle a0 to a1 (degrees)."""
+    return [(cx + r * math.cos(math.radians(lerp(a0, a1, k / n))), cz + r * math.sin(math.radians(lerp(a0, a1, k / n)))) for k in range(n + 1)]
+
+
+def door_handle(name, body, root, s, hx, hz, chrome, recess):
+    """A pull handle standing off the door in a dark recess."""
+    decal(name + 'Recess', body, recess, root,
+          lambda u, v: (hx + 0.075 * v * math.cos(u * 2 * math.pi), s * 3.0, hz + 0.024 * v * math.sin(u * 2 * math.pi)),
+          (0, -s, 0), 32, 3, 0.0015)
+    p, n = body_hit(body, (hx, s * 3.0, hz), (0, -s, 0))
+    if p is None:
+        return
+    rings = []
+    for k in range(11):
+        t = k / 10
+        sc = max(0.25, math.sin(math.pi * t) ** 0.45)               # rounded ends
+        x = hx - 0.085 + 0.17 * t
+        rings.append(superring(x, 0.011 * sc, hz - 0.015 * sc, hz + 0.015 * sc, 12, 3.0))
+    rings = [[(q[0], q[1] + p.y + s * 0.017, q[2]) for q in r] for r in rings]
+    ho = mesh_obj(name, loft(rings), [chrome], parent=root)
+    subsurf(ho, 1)
+
+
 def body_hit(body, origin, direction):
     dg = bpy.context.evaluated_depsgraph_get()
     hit, loc, nor, _ = body.evaluated_get(dg).ray_cast(Vector(origin), Vector(direction).normalized(), distance=10.0)
@@ -1129,10 +1174,12 @@ def car(name, color, loc, rot_z):
         # side skirt, door handles
         decal(S + 'Skirt', body, mats['dark'], root, lambda u, v, s=s: (-1.0 + u * 2.0, s * 3.0, 0.3 + v * 0.07), (0, -s, 0), 40, 3, 0.004)
         for hx in (0.25, -0.62):
-            decal(S + 'Handle', body, mats['chrome'], root, lambda u, v, s=s, hx=hx: (hx - 0.09 + u * 0.18, s * 3.0, 0.8 + v * 0.03), (0, -s, 0), 6, 2, 0.008)
-        # door shut lines: front door, B-pillar, rear door, and the line under the window
-        for xs in (0.9, -0.28, -1.12):
-            decal(S + 'Seam', body, seam, root, lambda u, v, s=s, xs=xs: (xs - 0.004 + u * 0.008, s * 3.0, 0.33 + v * 0.62), (0, -s, 0), 1, 30, 0.002)
+            door_handle(S + 'Handle', body, root, s, hx, 0.815, mats['chrome'], seam)
+        # door shut lines from the sill up under the window; the rear door's edge curves round the arch
+        side_seam(S + 'DoorFront', body, root, seam, s, [(0.9, 0.955), (0.9, 0.37)])
+        side_seam(S + 'DoorB', body, root, seam, s, [(-0.28, 0.955), (-0.28, 0.37)])
+        a0 = math.degrees(math.atan2(0.6 - 0.345, -1.12 + 1.4))
+        side_seam(S + 'DoorRear', body, root, seam, s, [(-1.12, 0.955), (-1.12, 0.6)] + arch_path(-1.4, 0.345, 0.385, a0, 4.0)[1:])
         # hood and trunk side lines
         decal(S + 'Seam', body, seam, root, lambda u, v, s=s: (0.98 + u * 1.25, s * (0.74 + v * 0.008), 3.0), (0, 0, -1), 30, 1, 0.002)
         decal(S + 'Seam', body, seam, root, lambda u, v, s=s: (-2.25 + u * 0.75, s * (0.74 + v * 0.008), 3.0), (0, 0, -1), 12, 1, 0.002)
@@ -1321,7 +1368,7 @@ def car_i20(name, color, loc, rot_z):
         windows += [(-0.12, g['xf0'] - 0.2, v0, v1, glass_front),               # front door
                     (-1.02, -0.26, v0, v1, glass_rear),                         # rear door
                     (-1.42, -1.12, v0, v1, glass_rear)]                         # rear quarter (small)
-    gh_shell(S + 'Cabin', [shell_mat, seal], root, [w[:4] for w in windows], black_x=[(-0.26, -0.12), (-1.12, -1.02)])
+    gh_shell(S + 'Cabin', [shell_mat, seal], root, [w[:4] for w in windows], black_x=[(-0.26, -0.12), (-1.12, -1.02), (g['xf0'] - 0.2, g['xf0'])])
     for k, (x0, x1, v0, v1, gm) in enumerate(windows):
         thin(gh_surface(S + 'Window%d' % k, gm, root, x0, x1, v0, v1, 140, 20), 0.005)
     fb = bmesh.new()
@@ -1432,10 +1479,19 @@ def car_i20(name, color, loc, rot_z):
                                             I20_R + (I20_R + 0.035 + 0.075 * v) * math.sin(math.pi * (-0.12 + 1.24 * u))),
                   (0, -s, 0), 64, 3, 0.005)
         decal(S + 'SillCladding', body, cladding, root, lambda u, v, s=s: (-1.03 + u * 1.89, s * 3.0, 0.37 + v * 0.12), (0, -s, 0), 60, 3, 0.005)
-        for xs_ in (0.83, -0.19, -1.06):                              # door shut lines
-            decal(S + 'Seam', body, seam, root, lambda u, v, s=s, xs_=xs_: (xs_ - 0.004 + u * 0.008, s * 3.0, 0.5 + v * 0.52), (0, -s, 0), 1, 30, 0.002)
+        # door shut lines, from the sill up under the window: front door, B-pillar, and the rear door's
+        # rear edge, which curves round the wheel arch like a real rear door
+        def ztop(x):                                                 # where the shoulder meets the glasshouse
+            hw, zb_, zt_ = mcurve(I20_HW, x), mcurve(I20_BOT, x), mcurve(I20_TOP, x)
+            return (zb_ + zt_) / 2 + (zt_ - zb_) / 2 * max(0.0, 1 - (0.73 / hw) ** 4.5) ** (1 / 4.5)
+        # front edge: from the A-pillar base, sweeping back past the mirror and down along the wheel arch
+        side_seam(S + 'DoorFront', body, root, seam, s, [(0.95, ztop(0.95)), (0.93, 0.92), (0.88, 0.74), (0.845, 0.62), (0.82, 0.495)])
+        side_seam(S + 'DoorB', body, root, seam, s, [(-0.19, ztop(-0.19)), (-0.19, 0.495)])
+        rx = I20_WHEELS[1]
+        a0 = math.degrees(math.atan2(0.6 - I20_R, -1.06 - rx))
+        side_seam(S + 'DoorRear', body, root, seam, s, [(-1.06, ztop(-1.06)), (-1.06, 0.6)] + arch_path(rx, I20_R, 0.43, a0, 24.0)[1:])
         for hx in (0.32, -0.6):
-            decal(S + 'Handle', body, mats['chrome'], root, lambda u, v, s=s, hx=hx: (hx - 0.09 + u * 0.18, s * 3.0, 0.93 + v * 0.03), (0, -s, 0), 6, 2, 0.008)
+            door_handle(S + 'Handle', body, root, s, hx, 0.945, mats['chrome'], seam)
         decal(S + 'Seam', body, seam, root, lambda u, v, s=s: (0.98 + u * 0.6, s * (0.66 + v * 0.008), 3.0), (0, 0, -1), 24, 1, 0.002)   # hood sides
         decal(S + 'Seam', body, seam, root, lambda u, v, s=s: (-4.0, s * (0.375 + u * 0.008), 0.62 + v * 0.42), (1, 0, 0), 1, 24, 0.002)  # tailgate sides
     decal(S + 'Seam', body, seam, root, lambda u, v: (0.98 + v * 0.008, -0.7 + u * 1.4, 3.0), (0, 0, -1), 30, 1, 0.002)        # hood rear edge
@@ -1557,7 +1613,7 @@ def car_i20(name, color, loc, rot_z):
 
     # ---- wing mirrors on short stalks at the window base
     for s in (1, -1):
-        base = gh_point(g['xf0'] - 0.24, 0.02 if s < 0 else 0.98)
+        base = gh_point(g['xf0'] - 0.12, 0.03 if s < 0 else 0.97)       # on the black sail
         mr = []
         for k in range(6):
             t = k / 5
@@ -1746,6 +1802,7 @@ I20_STUDIO = [
     ('i20_cockpit', (2.6, -0.7, 2.4), (0.2, 0.2, 1.0), 32, None),
     ('i20_wheel', (2.2, -2.2, 0.5), (1.2, -0.745, 0.31), 55, None),
     ('i20_top', (3.0, -3.2, 4.3), (0.0, 0, 0.8), 40, None),
+    ('i20_doors', (-0.2, -4.2, 1.05), (-0.2, -0.8, 0.8), 40, None),
 ]
 
 
