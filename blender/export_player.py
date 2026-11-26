@@ -13,11 +13,11 @@ What it does:
   * animations on the skeleton (all keyed from the A-pose rest):
       Idle  - breathing, a slight weight shift, arms hanging straight
       Walk  - 1.34 m per cycle, feet planted by leg IK (no sliding), straight arms swinging
-      Run   - 2.4 m per cycle, flight phase, straight arms swinging
+      Run   - 2.4 m per cycle, flight phase, elbows bent about 90 deg, loose fists
       Drive - sitting, hands on the wheel
       Jump  - in the air
-  * a shape key on the shirt, ArmsDown, pressing its sides in under the arms
-    (the game turns it on with Idle, Walk and Run),
+  * shape keys on the shirt pressing its sides in under the arms: ArmsDown for
+    Idle and Walk, ArmsDownRun for Run (the game sets them by those weights),
   * checks every animation frame, and the game's cloth springs at their limits:
     no skin through the clothes, no garment through the one over it,
   * exports a skinned .glb (no Draco: it loads anywhere without a decoder), with
@@ -28,6 +28,7 @@ import numpy as np
 from mathutils import Vector, Matrix, Quaternion
 from mathutils.bvhtree import BVHTree
 from mathutils.kdtree import KDTree
+from mathutils import geometry
 from collections import defaultdict
 
 A = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
@@ -301,7 +302,9 @@ def leg(s, ankle, pitch, toes=0.0, rel=0.0):
         rot('toes_' + s, X, toes)
 
 
-def curl_fingers(s, base, tip, thumb=8.0):
+def curl_fingers(s, base, tip, thumb=8.0, thumb_in=0.0):
+    """Curl the fingers (deg at the base and the middle joints); thumb: turn
+    the thumb out of the palm; thumb_in: fold it over the fingers (a fist)."""
     hand_z = PB['hand_' + s].bone.matrix_local.col[2].to_3d()
     for f in ('index', 'middle', 'ring', 'pinky'):
         for k, deg in ((1, base), (2, tip), (3, tip * 0.7)):
@@ -312,6 +315,9 @@ def curl_fingers(s, base, tip, thumb=8.0):
             sign = 1.0 if moved.dot(hand_z) > 0 else -1.0
             rot(n, ax, sign * deg)
     rot('thumb02_' + s, PB['thumb02_' + s].bone.matrix_local.col[0].to_3d(), thumb)
+    if thumb_in:
+        for n, k in (('thumb01_', 0.6), ('thumb02_', 1.0), ('thumb03_', 0.5)):
+            rot(n + s, PB[n + s].bone.matrix_local.col[0].to_3d(), -thumb_in * k)
 
 
 def arm_pose(s, down, swing, elbow, out=0.0):
@@ -434,7 +440,7 @@ def gait(t, P):
     for s, ph in (('L', (t + 0.5) % 1.0), ('R', t)):          # each arm swings with the opposite leg
         sw = P['arm_swing'] * math.cos(2 * math.pi * ph)
         arm_pose(s, P['arm_down'], sw + P['arm_fwd'], P['elbow'] + P['elbow_swing'] * max(0.0, math.cos(2 * math.pi * ph)))
-        curl_fingers(s, P['fingers'], P['fingers'] * 1.5)
+        curl_fingers(s, P['fingers'], P['fingers'] * 1.5, P['thumb'], P['thumb_in'])
     hem_over_thighs()
     # the cloth swings a little behind the body
     k = P['cloth']
@@ -451,11 +457,11 @@ def gait(t, P):
 WALK = dict(run=False, stride=1.34, beta=0.62, front=0.30, width=0.12, drop=0.030, bob=0.012, sway=0.012,
             yaw=4.0, roll=2.5, lean=2.0, strike=-10.0, toe_off=24.0, flat_at=0.1, heel_off=0.38, clear=0.055,
             clear_pow=1.4, kick=0.04, arm_down=49.0, arm_swing=18.0, arm_fwd=2.0, elbow=3.0, elbow_swing=0.0,
-            fingers=8.0, cloth=1.0, cycle=0.94, ride=0.6)
+            fingers=8.0, thumb=8.0, thumb_in=0.0, cloth=1.0, cycle=0.94, ride=0.6)
 RUN = dict(run=True, stride=2.4, beta=0.38, front=0.23, width=0.125, drop=0.05, bob=0.03, sway=0.008, bob_phase=0.19,
            yaw=6.0, roll=2.5, lean=7.0, strike=-6.0, toe_off=28.0, flat_at=0.06, heel_off=0.2, clear=0.19,
-           clear_pow=0.8, kick=0.17, arm_down=47.0, arm_swing=32.0, arm_fwd=4.0, elbow=4.0, elbow_swing=0.0,
-           fingers=20.0, cloth=2.0, cycle=0.6, ride=0.95)
+           clear_pow=0.8, kick=0.17, arm_down=42.0, arm_swing=32.0, arm_fwd=4.0, elbow=78.0, elbow_swing=16.0,
+           fingers=55.0, thumb=8.0, thumb_in=45.0, cloth=2.0, cycle=0.6, ride=0.95)
 
 
 def pose_drive(t):
@@ -518,11 +524,14 @@ REPORT['cycles'] = {'Walk': {'metres': WALK['stride'], 'seconds': round(round(WA
 # ------------------------------------------------------------------ the shirt gives way under the arms
 # With the arms hanging straight down, the inner arm rests against the side of
 # the body, where the shirt stands about a centimetre off it. Cloth there is
-# pressed in: a shape key, ArmsDown, moves the shirt's sides inward just enough
-# to clear the arm and the sleeve in every frame of Idle, Walk and Run (the body
-# under the shirt is hidden by the mask, so the cloth may go into it). The game
-# turns it on with those animations; Drive and Jump hold the arms away.
-ARMS_DOWN = {'Idle': 1.0, 'Walk': 1.0, 'Run': 1.0}
+# pressed in: a shape key moves the shirt's sides inward just enough to clear
+# the arm and the sleeve in every frame (the body under the shirt is hidden by
+# the mask, so the cloth may go into it). ArmsDown is for Idle and Walk, where
+# the hands hang by the hips; ArmsDownRun for Run, where the elbows are bent and
+# only the upper arm is by the body (ArmsDown there would show a dent). The game
+# sets each to its animations' weight; Drive and Jump hold the arms away.
+PRESS = {'ArmsDown': ('Idle', 'Walk'), 'ArmsDownRun': ('Run',)}
+PRESS_FRAMES = {'Idle': range(0, 120, 10), 'Walk': range(0, 28, 2), 'Run': range(18)}
 GAP = 0.008                         # (more than the thickness of the gaps between the cloth points)
 
 
@@ -537,19 +546,19 @@ def skin_rotation(o, vi):
     return M / tot if tot > 0 else np.eye(3)
 
 
-def arms_down_key():
+def arms_down_key(name):
     SP0 = np.array([v.co[:] for v in shirt.data.vertices])
-    side_of = np.sign(SP0[:, 0])
+    spolys = [tuple(p.vertices) for p in shirt.data.polygons]
+    # the sleeves stay as they are (cut as the checks cut them): only the shirt's
+    # body under the arms gives way
+    sf = sleeve_faces(SP0, spolys)
     sleeve = np.zeros(len(SP0), bool)
     for s in 'LR':
-        J, E = REST['upperarm_' + s]; a = np.array((E - J).normalized()); Ln = (E - J).length
-        d = SP0 - np.array(J); t = (d @ a) / Ln
-        r = np.linalg.norm(d - np.outer(d @ a, a), axis=1)
-        sleeve |= (t > 0.1) & (r < 0.11) & (SP0[:, 0] * SX[s] > 0.12)
+        for i in np.where(sf[s])[0]:
+            sleeve[list(spolys[i])] = True
+    sleeve_polys = {s: [spolys[i] for i in np.where(sf[s])[0]] for s in 'LR'}
     region = (np.abs(SP0[:, 0]) > 0.10) & (SP0[:, 2] > 1.04) & (SP0[:, 2] < 1.40) & ~sleeve
     cand = np.where(region)[0]
-    spolys = [tuple(p.vertices) for p in shirt.data.polygons]
-    sleeve_polys = [p for p in spolys if sleeve[list(p)].all()]
     arm_g = {s: {i for i, g in enumerate(body.vertex_groups) if g.name.endswith('_' + s) and
                  any(k in g.name for k in ('upperarm', 'lowerarm', 'hand', 'thumb', 'index', 'middle', 'ring', 'pinky'))} for s in 'LR'}
     armw = {s: np.zeros(len(body.data.vertices)) for s in 'LR'}
@@ -562,12 +571,12 @@ def arms_down_key():
     arm_polys = {s: [tuple(p.vertices) for p in body.data.polygons if p.material_index in skins
                      and armw[s][list(p.vertices)].max() > 0.15 and VIS[list(p.vertices)].all()] for s in 'LR'}
     need = np.zeros((len(SP0), 3)); need_len = np.zeros(len(SP0))
-    samples = [('Idle', f) for f in range(0, 120, 10)] + [('Walk', f) for f in range(0, 28, 2)] + [('Run', f) for f in range(18)]
+    samples = [(a, f) for a in PRESS[name] for f in PRESS_FRAMES[a]]
     for act, f in samples:
         arm.animation_data.action = ACTIONS[act]; scene.frame_set(f)
         Pb, _ = evaluated(body); Ps, _ = evaluated(shirt)
         obst = {s: [BVHTree.FromPolygons([Vector(p) for p in Pb], arm_polys[s]),
-                    BVHTree.FromPolygons([Vector(p) for p in Ps], [p for p in sleeve_polys if side_of[p[0]] == SX[s]])] for s in 'LR'}
+                    BVHTree.FromPolygons([Vector(p) for p in Ps], sleeve_polys[s])] for s in 'LR'}
 
         def clearance(co, s):
             c = 1.0
@@ -591,33 +600,82 @@ def arms_down_key():
             if np.linalg.norm(rd) > need_len[i]:
                 need[i] = rd; need_len[i] = np.linalg.norm(rd)
     arm.animation_data.action = None; scene.frame_set(0); clear()
-    # spread the push over the cloth around it, never below what each point needs
     bm = bmesh.new(); bm.from_mesh(shirt.data); bm.verts.ensure_lookup_table()
     E = np.array([(e.verts[0].index, e.verts[1].index) for e in bm.edges]); bm.free()
-    D = need.copy()
-    for _ in range(25):
-        S = np.zeros_like(D); cnt = np.zeros(len(D))
-        np.add.at(S, E[:, 0], D[E[:, 1]]); np.add.at(S, E[:, 1], D[E[:, 0]])
-        np.add.at(cnt, E[:, 0], 1); np.add.at(cnt, E[:, 1], 1)
-        D = 0.5 * D + 0.5 * S / np.maximum(cnt, 1)[:, None]
-        L = np.linalg.norm(D, axis=1)
-        short = (need_len > 0) & (L < need_len)
-        D[short] *= (need_len[short] / np.maximum(L[short], 1e-9))[:, None]
+
+    def spread():
+        """The push spread over the cloth around it, never below what each point needs."""
+        D = need.copy()
+        for _ in range(25):
+            S = np.zeros_like(D); cnt = np.zeros(len(D))
+            np.add.at(S, E[:, 0], D[E[:, 1]]); np.add.at(S, E[:, 1], D[E[:, 0]])
+            np.add.at(cnt, E[:, 0], 1); np.add.at(cnt, E[:, 1], 1)
+            D = 0.5 * D + 0.5 * S / np.maximum(cnt, 1)[:, None]
+            L = np.linalg.norm(D, axis=1)
+            short = (need_len > 0) & (L < need_len)
+            D[short] *= (need_len[short] / np.maximum(L[short], 1e-9))[:, None]
+        return D
     if not shirt.data.shape_keys:
         shirt.shape_key_add(name='Basis', from_mix=False)
-    key = shirt.shape_key_add(name='ArmsDown', from_mix=False)
-    for i, v in enumerate(key.data):
-        v.co = Vector(SP0[i] + D[i])
-    key.value = 0.0
-    log('ArmsDown: %d shirt points pushed, up to %.1f mm, %d moved after spreading' %
-        ((need_len > 0).sum(), need_len.max() * 1000, (np.linalg.norm(D, axis=1) > 1e-4).sum()))
-    REPORT['arms_down_mm'] = round(float(need_len.max() * 1000), 1)
+    key = shirt.shape_key_add(name=name, from_mix=False)
+    for kb in shirt.data.shape_keys.key_blocks[1:]:
+        kb.value = 0.0
+    # The push above is measured at the cloth's corners: skin can still bulge
+    # into a face between them. Measure the arm's skin against the faces, as the
+    # checks do, and push those faces' corners further until it clears them.
+    press_faces = [f for f in spolys if region[list(f)].all()]
+    body_bvh0 = BVHTree.FromPolygons([Vector(p) for p in SP0], [spolys[i] for i in range(len(spolys)) if not (sf['L'][i] or sf['R'][i])])
+    skin_pts = {}
+    for s in 'LR':
+        vs = sorted({v for f in arm_polys[s] for v in f})
+        pts = [('v', v) for v in vs] + [('f', f) for f in arm_polys[s]]
+        rest = [CO0[v] if k == 'v' else CO0[list(v)].mean(0) for k, v in pts]
+        # (skin that is under the shirt's body at rest, in the armpit, is not the arm pressing on it)
+        skin_pts[s] = [p for p, q in zip(pts, rest) if not under_at_rest(body_bvh0, Vector(q))]
+    SKIN_GAP = 0.003
+    for rnd in range(6):
+        D = spread()
+        for i, v in enumerate(key.data):
+            v.co = Vector(SP0[i] + D[i])
+        key.value = 1.0
+        extra = {}
+        for act, f in samples:
+            arm.animation_data.action = ACTIONS[act]; scene.frame_set(f)
+            Pb, _ = evaluated(body); Ps, _ = evaluated(shirt)
+            bvh = BVHTree.FromPolygons([Vector(p) for p in Ps], press_faces)
+            for s in 'LR':
+                for k, v in skin_pts[s]:
+                    q = Vector(Pb[v] if k == 'v' else Pb[list(v)].mean(0))
+                    loc, nrm, fi, d = bvh.find_nearest(q, SKIN_GAP + 0.002)
+                    if loc is None:
+                        continue
+                    sd = (q - loc).dot(nrm)
+                    if d > 1e-5 and abs(sd) < 0.5 * d:
+                        continue                               # beside the cloth's edge, not on it
+                    if sd >= SKIN_GAP:
+                        continue
+                    push = -nrm * (SKIN_GAP - sd + 0.001)
+                    for c in press_faces[fi]:
+                        rd = np.linalg.solve(skin_rotation(shirt, c), np.array(push))
+                        if c not in extra or np.linalg.norm(rd) > np.linalg.norm(extra[c]):
+                            extra[c] = rd
+        arm.animation_data.action = None; scene.frame_set(0); clear(); key.value = 0.0
+        if not extra:
+            break
+        for c, rd in extra.items():
+            need[c] = need[c] + rd; need_len[c] = np.linalg.norm(need[c])
+        log('%s: round %d, %d cloth points pushed further' % (name, rnd + 1, len(extra)))
+    log('%s: %d shirt points pushed, up to %.1f mm, %d moved after spreading%s' %
+        (name, (need_len > 0).sum(), need_len.max() * 1000, (np.linalg.norm(D, axis=1) > 1e-4).sum(),
+         '' if not extra else ' (STILL SHORT)'))
+    REPORT.setdefault('press_mm', {})[name] = round(float(need_len.max() * 1000), 1)
 
 
 def set_arms_down(action_name):
-    kb = shirt.data.shape_keys.key_blocks.get('ArmsDown') if shirt.data.shape_keys else None
-    if kb is not None:
-        kb.value = ARMS_DOWN.get(action_name, 0.0)
+    for name, acts in PRESS.items():
+        kb = shirt.data.shape_keys.key_blocks.get(name) if shirt.data.shape_keys else None
+        if kb is not None:
+            kb.value = 1.0 if action_name in acts else 0.0
 
 # ------------------------------------------------------------------ the game's mask
 # The .blend keeps a band of skin inside the sleeves, for looking into them from
@@ -729,6 +787,18 @@ REST_PTS = np.vstack([CO0[vis_idx], np.array([CO0[f].mean(0) for f in vis_faces]
 WHERE = {}
 
 
+def sleeve_faces(P, polys):
+    """The shirt's faces that are the left and right sleeves (by the faces'
+    rest positions along and around the upper arm)."""
+    C = np.array([P[list(f)].mean(0) for f in polys]); out = {}
+    for s in 'LR':
+        J, E = REST['upperarm_' + s]; a = np.array((E - J).normalized()); Ln = (E - J).length
+        d = C - np.array(J); t = (d @ a) / Ln
+        r = np.linalg.norm(d - np.outer(d @ a, a), axis=1)
+        out[s] = (t > 0.05) & (r < 0.12) & (C[:, 0] * SX[s] > 0.12)
+    return out
+
+
 def cloth_pieces():
     """Each garment as pieces of cloth (the shirt: its body and the two sleeves),
     as face lists of the evaluated mesh."""
@@ -736,27 +806,14 @@ def cloth_pieces():
     for n, o in GARM.items():
         P, polys = evaluated(o)
         if n == 'TShirt':
+            sf = sleeve_faces(P, polys)
             for s in 'LR':
-                J, E = REST['upperarm_' + s]; a = np.array((E - J).normalized()); Ln = (E - J).length
-                C = np.array([P[list(f)].mean(0) for f in polys]); d = C - np.array(J); t = (d @ a) / Ln
-                r = np.linalg.norm(d - np.outer(d @ a, a), axis=1)
-                sl = (t > 0.05) & (r < 0.12) & (C[:, 0] * SX[s] > 0.12)
-                out['TShirt/sleeve_' + s] = (o, [i for i in range(len(polys)) if sl[i]])
+                out['TShirt/sleeve_' + s] = (o, [i for i in range(len(polys)) if sf[s][i]])
             taken = set(out['TShirt/sleeve_L'][1]) | set(out['TShirt/sleeve_R'][1])
             out['TShirt/body'] = (o, [i for i in range(len(polys)) if i not in taken])
         else:
             out[n] = (o, list(range(len(polys))))
     return out
-
-
-def signed(bvh, co, maxd):
-    loc, nrm, idx, d = bvh.find_nearest(co, maxd)
-    if loc is None:
-        return None
-    s = (co - loc).dot(nrm)
-    if d > 1e-5 and abs(s) < 0.95 * d:
-        return None                                  # beyond the cloth's edge
-    return s
 
 
 def under_at_rest(bvh, co):
@@ -767,16 +824,43 @@ def under_at_rest(bvh, co):
     return loc is not None and (co - loc).dot(nrm) < -0.5 * max(d, 1e-9)
 
 
+def patch_nearest(P, fl, idxs, co):
+    """The nearest point of the faces fl[j], j in idxs (posed at P): (point, normal, distance)."""
+    best = None
+    for j in idxs:
+        V = [Vector(P[v]) for v in fl[j]]
+        n = geometry.normal(V)
+        for a in range(1, len(V) - 1):
+            cp = geometry.closest_point_on_tri(co, V[0], V[a], V[a + 1])
+            d = (co - cp).length
+            if best is None or d < best[2]:
+                best = (cp, n, d)
+    return best
+
+
 def skin_check_setup():
-    """In the rest pose, which piece of cloth each visible skin point is under."""
+    """In the rest pose, which piece of cloth each visible skin point is under,
+    and the patch of that cloth over it (its faces within 3 cm)."""
     clear(); arm.animation_data.action = None
-    global PIECES, UNDER, EDGE
+    global PIECES, UNDER, EDGE, PATCH
     PIECES = cloth_pieces()
-    UNDER, EDGE = {}, {}
+    UNDER, EDGE, PATCH = {}, {}, {}
+    disagree = 0
     for name, (o, faces) in PIECES.items():
         P, polys = evaluated(o)
-        bvh = BVHTree.FromPolygons([Vector(p) for p in P], [polys[i] for i in faces])
+        fl = [polys[i] for i in faces]
+        bvh = BVHTree.FromPolygons([Vector(p) for p in P], fl)
         UNDER[name] = np.array([under_at_rest(bvh, Vector(q)) for q in REST_PTS])
+        kdf = KDTree(len(fl))
+        for j, f in enumerate(fl):
+            kdf.insert(Vector(P[list(f)].mean(0)), j)
+        kdf.balance()
+        PATCH[name] = {}
+        for k in np.where(UNDER[name])[0]:
+            PATCH[name][k] = {j for _, j, _ in kdf.find_range(Vector(REST_PTS[k]), 0.03)} | {bvh.find_nearest(Vector(REST_PTS[k]), 0.03)[2]}
+            r = patch_nearest(P, fl, PATCH[name][k], Vector(REST_PTS[k]))
+            if r is None or (Vector(REST_PTS[k]) - r[0]).dot(r[1]) >= 0:
+                disagree += 1
         # skin within 1.5 cm of the piece's edge (a hem, a cut, where a sleeve
         # meets the shirt): "under" and "outside" are not defined there
         cnt = defaultdict(int)
@@ -790,6 +874,8 @@ def skin_check_setup():
             kd.insert(Vector(P[v]), j)
         kd.balance()
         EDGE[name] = np.array([len(bv) > 0 and kd.find(Vector(q))[2] < 0.015 for q in REST_PTS])
+    log('skin under the cloth at rest: %d points; the patch test disagrees with the nearest-face test on %d' %
+        (sum(int(u.sum()) for u in UNDER.values()), disagree))
 
 
 def check_frame():
@@ -805,15 +891,25 @@ def check_frame():
     for name, (o, faces) in PIECES.items():
         g = name.split('/')[0]
         P, _, polys = S[g]
-        bvh = BVHTree.FromPolygons([Vector(p) for p in P], [polys[i] for i in faces])
+        fl = [polys[i] for i in faces]
+        bvh = BVHTree.FromPolygons([Vector(p) for p in P], fl)
         n, worst, where = 0, 0.0, WHERE.setdefault('body>' + name, [])
         under, edge = UNDER[name], EDGE[name]
         for k, q in enumerate(pts):
             if edge[k]:
                 continue
-            sd = signed(bvh, Vector(q), 0.03 if under[k] else 0.02)
-            if sd is None:
+            co = Vector(q)
+            loc, nrm, fi, d = bvh.find_nearest(co, 0.03 if under[k] else 0.02)
+            if loc is None:
                 continue
+            if under[k] and fi not in PATCH[name][k]:
+                # skin under the cloth is measured against the cloth that was over
+                # it, not a fold of the same piece pressed close (as the underarm
+                # of a sleeve, folded between the arm and the body)
+                loc, nrm, d = patch_nearest(P, fl, PATCH[name][k], co)
+            sd = (co - loc).dot(nrm)
+            if d > 1e-5 and abs(sd) < 0.95 * d:
+                continue                                 # beyond the cloth's edge
             bad = (sd + 0.0003) if under[k] else (-sd)
             if bad > 0:
                 n += 1; worst = max(worst, bad)
@@ -827,7 +923,8 @@ def check_frame():
     return out
 
 
-arms_down_key()
+for name in PRESS:
+    arms_down_key(name)
 skin_check_setup()
 summary = {}
 for name, fn, n, loop in [('Rest', None, 1, False)] + ANIMS:
@@ -862,7 +959,7 @@ REPORT['checks'] = summary
 # arm or the leg inside, so they only sway. Every spring at its limits together
 # is checked on frames of Idle, Walk and Run.
 SPRINGS = {'cloth_shirt_B': ((-0.04, 0.35), (-0.12, 0.12)),
-           'cloth_sleeve_L': ((-0.1, 0.1), (-0.06, 0.06)), 'cloth_sleeve_R': ((-0.1, 0.1), (-0.06, 0.06)),
+           'cloth_sleeve_L': ((-0.07, 0.1), (-0.06, 0.06)), 'cloth_sleeve_R': ((-0.07, 0.1), (-0.06, 0.06)),
            'cloth_jeans_L': ((-0.08, 0.08), (-0.05, 0.05)), 'cloth_jeans_R': ((-0.08, 0.08), (-0.05, 0.05))}
 REPORT['springs'] = {n: {'p': list(p), 'r': list(r)} for n, (p, r) in SPRINGS.items()}
 
@@ -901,6 +998,40 @@ def spring_reach():
 
 
 spring_reach()
+
+
+def blend_check():
+    """Speeding up or slowing down, the game blends Walk and Run, in step (as its
+    animation mixer does: rotations slerped, the pelvis's position lerped), each
+    press shape at its animation's weight."""
+    nW, nR = round(WALK['cycle'] * FPS), round(RUN['cycle'] * FPS)
+    worst, n = {}, 0
+    keys = shirt.data.shape_keys.key_blocks
+    for t in (0.0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875):
+        pose = {}
+        for act, nf in (('Walk', nW), ('Run', nR)):
+            arm.animation_data.action = ACTIONS[act]; scene.frame_set(round(t * nf))
+            pose[act] = {pb.name: (pb.rotation_quaternion.copy(), pb.location.copy()) for pb in PB}
+        arm.animation_data.action = None
+        for w in (0.25, 0.5, 0.75):
+            for pb in PB:
+                (qa, la), (qb, lb) = pose['Walk'][pb.name], pose['Run'][pb.name]
+                pb.rotation_quaternion = qa.slerp(qb, w); pb.location = la.lerp(lb, w)
+            keys['ArmsDown'].value = 1 - w; keys['ArmsDownRun'].value = w
+            upd(); n += 1
+            for k, (cnt, wv) in check_frame().items():
+                if cnt:
+                    c0, w0 = worst.get(k, (0, 0.0)); worst[k] = (c0 + cnt, max(w0, wv))
+    clear(); set_arms_down('Rest')
+    log('check Walk/Run blends, %d poses: %s' % (n, 'OK' if not worst else {k: (c, round(v * 1000, 1)) for k, (c, v) in worst.items()}))
+    for k, v in WHERE.items():
+        if v:
+            log('      %s at rest positions %s' % (k, v))
+    WHERE.clear()
+    REPORT['checks']['Walk/Run blends'] = {k: dict(points=c, worst_mm=round(v * 1000, 1)) for k, (c, v) in worst.items()}
+
+
+blend_check()
 if os.environ.get('PLAYER_DEBUG_BLEND'):                 # (for looking at the checks' findings)
     bpy.ops.wm.save_as_mainfile(filepath=os.environ['PLAYER_DEBUG_BLEND'], copy=True)
 

@@ -9,7 +9,10 @@
    "seconds": 0.6
   }
  },
- "arms_down_mm": 46.1,
+ "press_mm": {
+  "ArmsDown": 44.1,
+  "ArmsDownRun": 30.0
+ },
  "checks": {
   "Rest": {},
   "Idle": {},
@@ -22,7 +25,8 @@
    }
   },
   "Jump": {},
-  "springs at their limits": {}
+  "springs at their limits": {},
+  "Walk/Run blends": {}
  },
  "springs": {
   "cloth_shirt_B": {
@@ -37,7 +41,7 @@
   },
   "cloth_sleeve_L": {
    "p": [
-    -0.1,
+    -0.07,
     0.1
    ],
    "r": [
@@ -47,7 +51,7 @@
   },
   "cloth_sleeve_R": {
    "p": [
-    -0.1,
+    -0.07,
     0.1
    ],
    "r": [
@@ -76,5 +80,5 @@
    ]
   }
  },
- "bytes": 3060184
+ "bytes": 3136016
 }
