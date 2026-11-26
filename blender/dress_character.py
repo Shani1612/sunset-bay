@@ -120,6 +120,8 @@ SIDE = {'L': 1.0, 'R': -1.0}
 
 BONE = {b.name: (Vector(b.head_local), Vector(b.tail_local)) for b in arm.data.bones}
 BODY_BVH = BVHTree.FromPolygons([Vector(c) for c in CO], [tuple(p.vertices) for p in skin_polys])
+_bmn = bmesh.new(); _bmn.from_mesh(me); _bmn.verts.ensure_lookup_table(); _bmn.normal_update()
+BNRM = np.array([v.normal[:] for v in _bmn.verts]); _bmn.free()
 log('body', NV, 'verts,', len(skin_polys), 'skin faces,', len(GN), 'groups')
 
 # dense samples of the skin surface (for the "hanging cloth" envelopes)
@@ -1164,8 +1166,9 @@ def rigid_sleeves(bm, P0):
     dl = bm.verts.layers.deform.active
     for s in 'LR':
         J, E = bone('upperarm_' + s); a = np.array((E - J).normalized()); Ln = (E - J).length
-        t = ((P0 - np.array(J)) @ a) / Ln
-        k = smoothstep(0.12, 0.38, t) * (P0[:, 0] * SIDE[s] > 0.15)
+        d = P0 - np.array(J); t = (d @ a) / Ln
+        r = np.linalg.norm(d - np.outer(d @ a, a), axis=1)        # distance from the arm's axis
+        k = smoothstep(0.12, 0.38, t) * (P0[:, 0] * SIDE[s] > 0.15) * smoothstep(0.11, 0.085, r)
         ua = GI['upperarm_' + s]
         for v, kk in zip(bm.verts, k):
             if kk <= 0:
@@ -1177,24 +1180,59 @@ def rigid_sleeves(bm, P0):
 
 
 def weights_like(bm, other, k):
-    """Blend each vertex's bone weights (by k) toward those of the nearest
-    vertices of another garment: the shirt's hem moves with the jeans under it."""
+    """Blend each vertex's bone weights (by k) toward those of the other
+    garment right under it (along the cloth's normal; the nearest vertices if
+    nothing is under it): the shirt's hem then moves exactly like the jeans
+    it hangs over, so the gap between them is kept in every pose."""
     dl = bm.verts.layers.deform.active
     O = other.data
-    kd = kd_of(np.array([v.co[:] for v in O.vertices]))
+    OP = np.array([v.co[:] for v in O.vertices])
+    kd = kd_of(OP)
+    obvh = BVHTree.FromPolygons([Vector(p) for p in OP], [tuple(p.vertices) for p in O.polygons])
+    OW = [{g.group: g.weight for g in v.groups} for v in O.vertices]
+    bm.normal_update()
     for v, kk in zip(bm.verts, k):
         if kk <= 0:
             continue
         acc = defaultdict(float); tot = 0.0
-        for co, i, d in kd.find_n(v.co, 4):
-            w = 1.0 / (d + 1e-3); tot += w
-            for g in O.vertices[i].groups:
-                acc[g.group] += w * g.weight
+        hit = obvh.ray_cast(v.co, -v.normal, 0.08)
+        if hit[0] is not None:
+            poly = O.polygons[hit[2]]
+            for i in poly.vertices:                      # interpolate over the face under the point
+                w = 1.0 / ((OP[i] - np.array(hit[0][:])) @ (OP[i] - np.array(hit[0][:])) + 1e-6)
+                tot += w
+                for g, gw in OW[i].items():
+                    acc[g] += w * gw
+        else:
+            for co, i, d in kd.find_n(v.co, 8):
+                w = 1.0 / (d + 0.004); tot += w
+                for g, gw in OW[i].items():
+                    acc[g] += w * gw
         dv = v[dl]
         for g in list(dv.keys()):
             dv[g] = dv[g] * (1 - kk)
         for g, w in acc.items():
             dv[g] = dv.get(g, 0.0) + kk * w / tot
+
+
+def hem_follows_thighs(bm, P):
+    """The front of the hem rests on the thighs: when a thigh lifts it carries
+    the hem up with it (a thigh lifting through the hip's crease would
+    otherwise pass through the cloth hanging in front of it)."""
+    dl = bm.verts.layers.deform.active
+    for s in 'LR':
+        tg, pg = GI['thigh_twist_' + s], GI['pelvis']
+        # (the centre, between the legs, is carried by both thighs, half each)
+        f = (smoothstep(1.03, 0.95, P[:, 2]) * smoothstep(-0.035, 0.035, P[:, 0] * SIDE[s])
+             * smoothstep(-0.03, -0.07, P[:, 1]))
+        for v, kk in zip(bm.verts, f):
+            if kk <= 0:
+                continue
+            d = v[dl]
+            for g in list(d.keys()):
+                d[g] = d[g] * (1 - kk)
+            d[tg] = d.get(tg, 0.0) + kk * 0.85
+            d[pg] = d.get(pg, 0.0) + kk * 0.15
 
 
 def smooth_weights(bm, mask, iters):
@@ -1243,7 +1281,7 @@ def make_shirt():
     # jeans' waistband, hanging straight down below the chest
     sel = (SAMP_ARM < 0.2) & (SAMP[:, 2] < 1.40) & (SAMP[:, 2] > 0.84)
     jb = bmesh.new(); jb.from_mesh(GARMENTS['Jeans']['ob'].data); jb.normal_update()
-    jpts = np.array([(v.co + v.normal * (GARMENTS['Jeans']['thickness'] + 0.006))[:] for v in jb.verts]); jb.free()
+    jpts = np.array([(v.co + v.normal * (GARMENTS['Jeans']['thickness'] + 0.0085))[:] for v in jb.verts]); jb.free()
     jpts_all = jpts.copy()
     jpts = jpts[jpts[:, 2] > 0.84]
     torso = Hang(np.vstack([SAMP[sel], jpts]), (0, -0.02, 0), (0, 0, 1), (1, 0, 0), htop=1.40, dh=0.012, nth=96)
@@ -1261,7 +1299,7 @@ def make_shirt():
         gs = 0.0045 + 0.0085 * smoothstep(0.10, 0.5, t)
         Ts = np.array(J) + np.outer(d @ a, a) + q / np.maximum(r, 1e-6)[:, None] * (r + gs)[:, None]
         T = T * (1 - ws[:, None]) + Ts * ws[:, None]
-    jeans_out = thick_bvh(GARMENTS['Jeans']['ob'], GARMENTS['Jeans']['thickness'] + 0.0055)
+    jeans_out = thick_bvh(GARMENTS['Jeans']['ob'], GARMENTS['Jeans']['thickness'] + 0.008)
     for _ in range(10):
         T = taubin(T, L, 3)
         T = pushout(T, [(BODY_BVH, 0.0042), (jeans_out, 0.0035, True)])
@@ -1278,14 +1316,29 @@ def make_shirt():
     relax_folds(bm, tag='shirt')
     rigid_sleeves(bm, P)
     weights_like(bm, GARMENTS['Jeans']['ob'], smoothstep(1.10, 1.02, P[:, 2]))
-    smooth_weights(bm, smoothstep(1.16, 1.06, P[:, 2]), 25)
+    # smooth only the band above the waistband (below it the shirt must move exactly like the jeans)
+    smooth_weights(bm, smoothstep(0.98, 1.04, P[:, 2]) * smoothstep(1.17, 1.08, P[:, 2]), 25)
+    hem_follows_thighs(bm, P)
+    # the lower centre front drapes a little further forward (it hangs from the chest)
+    for v in bm.verts:
+        c = v.co
+        k = _ss((1.06 - c.z) / 0.1) * _ss((0.09 - abs(c.x)) / 0.07) * (1.0 if c.y < -0.06 else 0.0)
+        if k > 0:
+            c.y -= 0.024 * k
+    bm.normal_update()
     attrs = shirt_details(bm)
     ob = to_object('TShirt', bm, m2); bm.free()
     for k, v in attrs.items():
         set_attr(ob.data, k, v)
-    # keep more skin inside the sleeves (you can look into them), less at the neck
-    GARMENTS['TShirt'] = dict(ob=ob, thickness=0.0016,
-                              margin=lambda p, i: 0.013 if abs(p[0]) > 0.2 else 0.03)
+    # a band of skin stays visible inside the sleeves all round (you can look into
+    # them from below), except the bit tucked in the armpit's crease, which the
+    # shirt's side presses against when the arms hang down
+    def shirt_margin(p, i):
+        if abs(p[0]) <= 0.2:
+            return 0.03
+        in_crease = BNRM[i][2] < -0.5 and abs(CO[i][0]) < 0.265
+        return 0.003 if in_crease else 0.013
+    GARMENTS['TShirt'] = dict(ob=ob, thickness=0.0016, margin=shirt_margin)
     log('tshirt', len(ob.data.vertices), 'verts, pieces cut away', nc - 1)
 
 
@@ -1378,6 +1431,16 @@ def build_mask():
             if (s <= 0 or d < 0.015) and away_from_edge(loc, i):
                 covered[i] = True; n += 1
         log('mask:', name, 'covers', n, 'body verts')
+    # the skin under the foot is enclosed by the sole (a closed slab up to its rim)
+    for sd in 'LR':
+        sole = SHOE_PARTS[sd]['sole']
+        R = np.array([v.co[:] for v in sole.data.vertices])
+        rim_z = SHOE_FLOOR + 0.013                    # 3 mm under the sole's rim
+        hull = convex_hull_2d(R[:, :2])
+        inside = sdf_poly(CO[:, :2], hull) < -0.002
+        n = int(np.sum(inside & (CO[:, 2] < rim_z) & SKINV & ~covered))
+        covered |= inside & (CO[:, 2] < rim_z) & SKINV
+        log('mask: inside sole', sd, n, 'more body verts')
     # glTF splits vertices along UV seams: the copies must agree
     key = defaultdict(list)
     for i, c in enumerate(np.round(CO, 6)):

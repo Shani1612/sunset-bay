@@ -289,6 +289,9 @@ for(const n of TEXN){
 }
 gltfL.load('assets/city.glb',g=>{CITY=g;},undefined,fail);
 gltfL.load('assets/actors.glb',g=>{ACTORS=g;},undefined,fail);
+// the player: the dressed, animated character (if it can't load, the game falls back to a simple figure)
+let PLAYERGLB=null;
+gltfL.load('assets/player.glb',g=>{PLAYERGLB=g;},undefined,e=>{console.warn('player model',e);});
 manager.onLoad=()=>{if(loadFailed||!CITY||!ACTORS)return;
   // the Hebrew lettering is drawn on canvases: wait (briefly) for the web font
   const font=document.fonts&&document.fonts.load?document.fonts.load('900 40px Heebo').catch(()=>{}):Promise.resolve();
@@ -877,7 +880,60 @@ function animPerson(p,speed,dt){
   p.legL.rotation.x=s;p.legR.rotation.x=-s;p.armL.rotation.x=-s*0.85;p.armR.rotation.x=s*0.85;
   p.body.position.y=speed>0.3?Math.abs(Math.cos(p.phase))*0.025*Math.min(1,speed/2):0;
 }
+// =====================================================================================================
+// the player's character: a skinned model with Idle / Walk / Run / Drive / Jump animations, and cloth
+// bones (shirt hem, sleeves, jeans legs) that swing on springs when he speeds up, stops or turns
+// =====================================================================================================
+const HERO_V={Walk:1.34/0.9333,Run:2.4/0.6};      // metres per second of the animation cycles (feet stay planted)
+const CLOTH_SPRINGS=[                               // bone, how much it lags (rad per m/s2), largest swing
+  {n:'cloth_shirt_B',k:0.05,max:0.35},{n:'cloth_sleeve_L',k:0.045,max:0.3},{n:'cloth_sleeve_R',k:0.045,max:0.3},
+  {n:'cloth_jeans_L',k:0.018,max:0.08},{n:'cloth_jeans_R',k:0.018,max:0.08}];
+function sstep(a,b,x){const t=Math.min(1,Math.max(0,(x-a)/(b-a)));return t*t*(3-2*t);}
+function makeHero(G){
+  const root=G.scene,g=new THREE.Group();g.add(root);scene.add(g);
+  root.traverse(o=>{if(!o.isMesh)return;o.castShadow=true;o.receiveShadow=true;o.frustumCulled=false;
+    const m=o.material;if(m&&m.map)m.map.anisotropy=MAX_ANISO;});
+  const mixer=new THREE.AnimationMixer(root),A={},w={};
+  for(const c of G.animations){const a=mixer.clipAction(c);a.play();a.setEffectiveWeight(c.name==='Idle'?1:0);A[c.name]=a;w[c.name]=c.name==='Idle'?1:0;}
+  const cloth=CLOTH_SPRINGS.map(c=>({...c,b:root.getObjectByName(c.n),p:0,pv:0,r:0,rv:0})).filter(c=>c.b);
+  return {hero:true,g,root,mixer,A,w,cloth,hip:1.01,last:null,vx:0,vz:0,ax:0,az:0,t:0};
+}
+const _hq=new THREE.Quaternion(),_hq2=new THREE.Quaternion(),_hv=new THREE.Vector3();
+function animHero(h,dt,o){
+  if(!h.A.Walk)return;
+  const tgt={Idle:0,Walk:0,Run:0,Drive:0,Jump:0};
+  if(o.seated)tgt.Drive=1;
+  else if(!o.ground)tgt.Jump=1;
+  else{const r=sstep(2.6,3.6,o.speed),wk=sstep(0.12,0.7,o.speed)*(1-r);tgt.Run=r;tgt.Walk=wk;tgt.Idle=Math.max(0,1-r-wk);}
+  const k=Math.min(1,dt*(o.seated?20:9));
+  for(const n in h.A){h.w[n]+=((tgt[n]||0)-h.w[n])*k;h.A[n].setEffectiveWeight(h.w[n]);}
+  const W=h.A.Walk,R=h.A.Run;
+  W.timeScale=Math.min(1.6,Math.max(0.55,o.speed/HERO_V.Walk));
+  if(R)R.timeScale=Math.min(1.5,Math.max(0.7,o.speed/HERO_V.Run));
+  if(R&&h.w.Walk>0.01&&h.w.Run>0.01){              // keep both cycles in step (same foot forward)
+    const [a,b]=h.w.Run>h.w.Walk?[R,W]:[W,R];b.time=a.time/a.getClip().duration*b.getClip().duration;}
+  h.mixer.update(dt);
+  // cloth: springs driven by the body's acceleration in its own frame (forward / sideways)
+  const x=h.g.position.x,z=h.g.position.z;h.t+=dt;
+  if(h.last&&dt>0&&!o.seated){const vx=(x-h.last.x)/dt,vz=(z-h.last.z)/dt,f=Math.min(1,dt*10);
+    h.ax+=((vx-h.vx)/dt-h.ax)*f;h.az+=((vz-h.vz)/dt-h.az)*f;h.vx=vx;h.vz=vz;}
+  else{h.ax*=0.8;h.az*=0.8;h.vx=h.vz=0;}
+  h.last={x,z};
+  const yaw=h.g.rotation.y,fw=h.ax*Math.sin(yaw)+h.az*Math.cos(yaw),sd=h.ax*Math.cos(yaw)-h.az*Math.sin(yaw);
+  const sp=Math.hypot(h.vx,h.vz);
+  h.root.updateMatrixWorld(true);
+  for(const c of h.cloth){
+    const flutter=c.n==='cloth_shirt_B'?0.05*Math.min(1,sp/4)*Math.sin(h.t*9.3):0;
+    const tp=Math.max(-c.max,Math.min(c.max,c.k*fw))+flutter,tr=Math.max(-c.max,Math.min(c.max,-c.k*sd));
+    c.pv+=(60*(tp-c.p)-8*c.pv)*dt;c.p+=c.pv*dt;c.rv+=(60*(tr-c.r)-8*c.rv)*dt;c.r+=c.rv*dt;
+    c.b.getWorldQuaternion(_hq2).invert();
+    _hv.set(Math.cos(yaw),0,-Math.sin(yaw)).applyQuaternion(_hq2);_hq.setFromAxisAngle(_hv,c.p);c.b.quaternion.multiply(_hq);
+    _hv.set(Math.sin(yaw),0,Math.cos(yaw)).applyQuaternion(_hq2);_hq.setFromAxisAngle(_hv,c.r);c.b.quaternion.multiply(_hq);
+  }
+}
 function seatPerson(p,car){ // sitting at the wheel: reclined at the hips, thighs forward, hands on the wheel
+  if(p.hero){p.g.rotation.set(0,0,0);p.g.position.set(car.seat.x,car.seat.y-p.hip+(car.kind==='sedan'?0.05:0),car.seat.z);car.bodyG.add(p.g);p.g.visible=true;
+    for(const n in p.A){p.w[n]=n==='Drive'?1:0;p.A[n].setEffectiveWeight(p.w[n]);}return;}
   const th=-0.3,h=p.hip;
   p.body.rotation.x=th;p.body.position.set(0,h-h*Math.cos(th),-h*Math.sin(th));
   p.legL.rotation.x=p.legR.rotation.x=-1.45-th;p.armL.rotation.x=p.armR.rotation.x=-0.95-th;
@@ -885,7 +941,7 @@ function seatPerson(p,car){ // sitting at the wheel: reclined at the hips, thigh
   p.g.position.set(car.seat.x,car.seat.y-p.hip,car.seat.z);
   car.bodyG.add(p.g);p.g.visible=true;
 }
-function unseat(p){if(p.g.parent)p.g.parent.remove(p.g);p.body.rotation.x=0;p.body.position.set(0,0,0);scene.add(p.g);}
+function unseat(p){if(p.g.parent)p.g.parent.remove(p.g);if(!p.hero){p.body.rotation.x=0;p.body.position.set(0,0,0);}scene.add(p.g);}
 
 const ALLCARS=[];
 const paintC={};
@@ -1186,7 +1242,7 @@ const player={x:0,z:0,y:0,vy:0,a:0,spd:0,car:null,model:null,onGround:true};
 const keys=new Set();
 const touch={x:0,y:0,run:false};
 function initPlayer(){
-  player.model=makePerson({female:false,shirt:'#2f4f7f',pants:'#2c4468'});
+  player.model=PLAYERGLB?makeHero(PLAYERGLB):makePerson({female:false,shirt:'#2f4f7f',pants:'#2c4468'});
   // start on the sidewalk of the middle block, facing the street
   const b=blockAt(1,1);player.x=(b.x0+b.x1)/2+6;player.z=b.z1+3.9;player.a=0;
   WALKERS.push(player);camYaw=0;
@@ -1221,6 +1277,7 @@ function updatePlayer(dt){
     const c=player.car,inp={up:keys.has('KeyW')||keys.has('ArrowUp')||touch.y<-0.3,down:keys.has('KeyS')||keys.has('ArrowDown')||touch.y>0.3,
       hand:keys.has('Space'),steer:(keys.has('KeyA')||keys.has('ArrowLeft')?1:0)-(keys.has('KeyD')||keys.has('ArrowRight')?1:0)-touch.x};
     carPhysics(c,inp,dt);engine(Math.abs(c.v),inp.up);
+    if(m.hero)animHero(m,dt,{seated:true,speed:0,ground:true});
     for(const q of peds){if(q.mode==='knocked'||q.mode==='ride'||Math.abs(c.v)<2.5)continue;
       for(const o of carCircles(c))if(Math.hypot(q.x-o.x,q.z-o.z)<c.hw+0.35){knock(q,c);break;}}
     player.x=c.x;player.z=c.z;
@@ -1233,7 +1290,7 @@ function updatePlayer(dt){
   const lx=Math.sin(camYaw),lz=Math.cos(camYaw),rx=-Math.cos(camYaw),rz=Math.sin(camYaw);
   let mx=lx*fw+rx*st,mz=lz*fw+rz*st;const ml=Math.hypot(mx,mz);
   const run=keys.has('ShiftLeft')||keys.has('ShiftRight')||touch.run;
-  const want=ml>0.15?(run?5.8:2.5):0;
+  const want=ml>0.15?(run?4.4:1.75):0;              // a brisk walk and a jog (the animations match these)
   player.spd+=(want-player.spd)*Math.min(1,dt*8);
   if(ml>0.15){mx/=ml;mz/=ml;player.a=turnTo(player.a,Math.atan2(mx,mz),dt*10);}
   player.x+=Math.sin(player.a)*player.spd*dt;player.z+=Math.cos(player.a)*player.spd*dt;
@@ -1248,7 +1305,8 @@ function updatePlayer(dt){
   player.vy-=14*dt;player.y+=player.vy*dt;
   if(player.y<=gy){player.y=lerp(player.y,gy,0.5);if(player.vy<0){player.vy=0;player.onGround=true;}}
   if(player.y<gy)player.y=gy;
-  m.g.position.set(player.x,player.y,player.z);m.g.rotation.set(0,player.a,0);animPerson(m,player.onGround?player.spd:0,dt);
+  m.g.position.set(player.x,player.y,player.z);m.g.rotation.set(0,player.a,0);
+  if(m.hero)animHero(m,dt,{speed:player.spd,ground:player.onGround});else animPerson(m,player.onGround?player.spd:0,dt);
 }
 
 // =====================================================================================================
@@ -1467,7 +1525,7 @@ addEventListener('keyup',e=>keys.delete(e.code));
 addEventListener('blur',()=>keys.clear());
 let drag=false,lx=0,ly=0;
 function look(dx,dy){camYaw-=dx*0.0032;camPitch=clamp(camPitch+dy*0.0025,-0.3,1.1);lookT=1.6;}
-canvas.addEventListener('mousedown',e=>{if(state!=='play')return;drag=true;lx=e.clientX;ly=e.clientY;if(!MOBILE&&canvas.requestPointerLock)canvas.requestPointerLock();});
+canvas.addEventListener('mousedown',e=>{if(state!=='play')return;drag=true;lx=e.clientX;ly=e.clientY;if(!MOBILE&&canvas.requestPointerLock){try{const r=canvas.requestPointerLock();if(r&&r.catch)r.catch(()=>{});}catch(e){}}});
 addEventListener('mouseup',()=>drag=false);
 addEventListener('mousemove',e=>{if(state!=='play')return;if(document.pointerLockElement===canvas)look(e.movementX,e.movementY);else if(drag){look(e.clientX-lx,e.clientY-ly);lx=e.clientX;ly=e.clientY;}});
 canvas.addEventListener('wheel',e=>{camFar=e.deltaY>0;},{passive:true});

@@ -63,3 +63,44 @@ Outputs:
   - leather and suede sneakers.
 - `human_dressed.glb`, for games: skinned, with flat PBR colours.
 - `renders/`: studio renders, including the walking test pose.
+
+## The player in the white city (`city/assets/player.glb`)
+
+The dressed character is the player in `city/`. `blender/export_player.py` makes
+the game version: the shoes are lighter, the hidden teeth are removed, the
+textures are 1024 px, and the cloth is single-layer and double-sided.
+
+It adds five animations on the skeleton:
+
+- **Idle:** breathing and a slight weight shift.
+- **Walk:** 1.34 m per 0.93 s cycle. The legs are solved with IK, so each
+  standing foot stays planted.
+- **Run:** 2.4 m per 0.6 s, with a flight phase.
+- **Drive:** sitting, with hands on the wheel.
+- **Jump.**
+
+It also adds cloth bones for the back of the shirt's hem, the sleeves and the
+jeans legs. Each animation has the cloth swing built in. In the game, springs on
+these bones also react to starting, stopping and turning. When a thigh lifts,
+it carries the front of the hem.
+
+Every frame of every animation is checked for skin through the clothes and for
+the shirt through the jeans. The results are in `player_report.json`:
+
+- 0 problems standing, walking, running and jumping.
+- When driving, the shirt overlaps the jeans at the lap. That part is hidden by
+  the car's door.
+
+```
+blender -b -P blender/export_player.py -- characters/human_dressed.blend city/assets/player.glb
+```
+
+How the game plays it:
+
+- It blends Idle, Walk and Run by speed: 1.75 m/s walking, 4.4 m/s with Shift
+  or the run button.
+- It scales the cycles to the speed, so the feet don't slide.
+- It switches to Drive in a car and to Jump in the air.
+- If `player.glb` can't load, the game uses its simple figure.
+
+`city/build_page.py` makes the published page.
