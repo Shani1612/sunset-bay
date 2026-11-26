@@ -72,22 +72,37 @@ textures are 1024 px, and the cloth is single-layer and double-sided.
 
 It adds five animations on the skeleton:
 
-- **Idle:** breathing and a slight weight shift.
+- **Idle:** breathing and a slight weight shift, with the arms hanging straight
+  beside the body.
 - **Walk:** 1.34 m per 0.93 s cycle. The legs are solved with IK, so each
-  standing foot stays planted.
-- **Run:** 2.4 m per 0.6 s, with a flight phase.
+  standing foot stays planted. The arms stay straight and swing.
+- **Run:** 2.4 m per 0.6 s, with a flight phase. The arms stay straight and
+  swing.
 - **Drive:** sitting, with hands on the wheel.
 - **Jump.**
 
+With the arms down, the inner arm rests against the shirt's side. A shape key on
+the shirt, `ArmsDown`, presses the cloth under the arms in, just enough to clear
+the arm and the sleeve in every frame of Idle, Walk and Run. The game turns it
+on with those animations; driving and jumping hold the arms away.
+
 It also adds cloth bones for the back of the shirt's hem, the sleeves and the
 jeans legs. Each animation has the cloth swing built in. In the game, springs on
-these bones also react to starting, stopping and turning. When a thigh lifts,
-it carries the front of the hem.
+these bones also react to starting, stopping and turning. Each spring is held
+within its own limits: the back of the hem swings back freely but hardly forward
+(the body is there), and the sleeves and the jeans legs only sway (an arm or a
+leg is inside).
+
+The front of the hem rests on the thighs. Two hem bones at the hips carry it up
+over a thigh that comes forward; over a thigh that goes back it just hangs.
 
 Every frame of every animation is checked for skin through the clothes and for
-the shirt through the jeans. The results are in `player_report.json`:
+the shirt through the jeans, and so is every spring at its limits. The checks
+use the same 4 strongest bones per vertex that glTF keeps. The results are in
+`player_report.json`:
 
-- 0 problems standing, walking, running and jumping.
+- 0 problems standing, walking, running and jumping, and with the springs at
+  their limits.
 - When driving, the shirt overlaps the jeans at the lap. That part is hidden by
   the car's door.
 
@@ -101,6 +116,7 @@ How the game plays it:
   or the run button.
 - It scales the cycles to the speed, so the feet don't slide.
 - It switches to Drive in a car and to Jump in the air.
+- It sets `ArmsDown` to the weight of Idle, Walk and Run.
 - If `player.glb` can't load, the game uses its simple figure.
 
 `city/build_page.py` makes the published page.

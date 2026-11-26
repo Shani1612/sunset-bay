@@ -9,6 +9,7 @@
    "seconds": 0.6
   }
  },
+ "arms_down_mm": 46.1,
  "checks": {
   "Rest": {},
   "Idle": {},
@@ -17,10 +18,63 @@
   "Drive": {
    "TShirt>Jeans": {
     "points": 60,
-    "worst_mm": 20.7
+    "worst_mm": 21.1
    }
   },
-  "Jump": {}
+  "Jump": {},
+  "springs at their limits": {}
  },
- "bytes": 2940164
+ "springs": {
+  "cloth_shirt_B": {
+   "p": [
+    -0.04,
+    0.35
+   ],
+   "r": [
+    -0.12,
+    0.12
+   ]
+  },
+  "cloth_sleeve_L": {
+   "p": [
+    -0.1,
+    0.1
+   ],
+   "r": [
+    -0.06,
+    0.06
+   ]
+  },
+  "cloth_sleeve_R": {
+   "p": [
+    -0.1,
+    0.1
+   ],
+   "r": [
+    -0.06,
+    0.06
+   ]
+  },
+  "cloth_jeans_L": {
+   "p": [
+    -0.08,
+    0.08
+   ],
+   "r": [
+    -0.05,
+    0.05
+   ]
+  },
+  "cloth_jeans_R": {
+   "p": [
+    -0.08,
+    0.08
+   ],
+   "r": [
+    -0.05,
+    0.05
+   ]
+  }
+ },
+ "bytes": 3060184
 }

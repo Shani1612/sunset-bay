@@ -885,9 +885,14 @@ function animPerson(p,speed,dt){
 // bones (shirt hem, sleeves, jeans legs) that swing on springs when he speeds up, stops or turns
 // =====================================================================================================
 const HERO_V={Walk:1.34/0.9333,Run:2.4/0.6};      // metres per second of the animation cycles (feet stay planted)
-const CLOTH_SPRINGS=[                               // bone, how much it lags (rad per m/s2), largest swing
-  {n:'cloth_shirt_B',k:0.05,max:0.35},{n:'cloth_sleeve_L',k:0.045,max:0.3},{n:'cloth_sleeve_R',k:0.045,max:0.3},
-  {n:'cloth_jeans_L',k:0.018,max:0.08},{n:'cloth_jeans_R',k:0.018,max:0.08}];
+// bone, how much it lags (rad per m/s2), and how far it may swing (rad): p about his right (+: the cloth swings
+// back), r about his forward axis. The limits are blender/export_player.py's SPRINGS, checked there with every
+// spring at its limits: the back of the hem can't swing into the body, the sleeves and jeans have a limb inside.
+const CLOTH_SPRINGS=[
+  {n:'cloth_shirt_B',k:0.05,p:[-0.04,0.35],r:[-0.12,0.12]},
+  {n:'cloth_sleeve_L',k:0.02,p:[-0.1,0.1],r:[-0.06,0.06]},{n:'cloth_sleeve_R',k:0.02,p:[-0.1,0.1],r:[-0.06,0.06]},
+  {n:'cloth_jeans_L',k:0.018,p:[-0.08,0.08],r:[-0.05,0.05]},{n:'cloth_jeans_R',k:0.018,p:[-0.08,0.08],r:[-0.05,0.05]}];
+const clampR=(v,[a,b])=>Math.max(a,Math.min(b,v));
 function sstep(a,b,x){const t=Math.min(1,Math.max(0,(x-a)/(b-a)));return t*t*(3-2*t);}
 function makeHero(G){
   const root=G.scene,g=new THREE.Group();g.add(root);scene.add(g);
@@ -895,8 +900,11 @@ function makeHero(G){
     const m=o.material;if(m&&m.map)m.map.anisotropy=MAX_ANISO;});
   const mixer=new THREE.AnimationMixer(root),A={},w={};
   for(const c of G.animations){const a=mixer.clipAction(c);a.play();a.setEffectiveWeight(c.name==='Idle'?1:0);A[c.name]=a;w[c.name]=c.name==='Idle'?1:0;}
-  const cloth=CLOTH_SPRINGS.map(c=>({...c,b:root.getObjectByName(c.n),p:0,pv:0,r:0,rv:0})).filter(c=>c.b);
-  return {hero:true,g,root,mixer,A,w,cloth,hip:1.01,last:null,vx:0,vz:0,ax:0,az:0,t:0};
+  const cloth=CLOTH_SPRINGS.map(c=>({...c,b:root.getObjectByName(c.n),pp:0,pv:0,rr:0,rv:0})).filter(c=>c.b);
+  // the shirt's ArmsDown shape: with the arms hanging by the body, the cloth under them is pressed in
+  const press=[];
+  root.traverse(o=>{if(o.morphTargetDictionary&&o.morphTargetDictionary.ArmsDown!==undefined)press.push([o,o.morphTargetDictionary.ArmsDown]);});
+  return {hero:true,g,root,mixer,A,w,cloth,press,hip:1.01,last:null,vx:0,vz:0,ax:0,az:0,t:0};
 }
 const _hq=new THREE.Quaternion(),_hq2=new THREE.Quaternion(),_hv=new THREE.Vector3();
 function animHero(h,dt,o){
@@ -913,9 +921,13 @@ function animHero(h,dt,o){
   if(R&&h.w.Walk>0.01&&h.w.Run>0.01){              // keep both cycles in step (same foot forward)
     const [a,b]=h.w.Run>h.w.Walk?[R,W]:[W,R];b.time=a.time/a.getClip().duration*b.getClip().duration;}
   h.mixer.update(dt);
+  const pr=Math.min(1,h.w.Idle+h.w.Walk+(h.w.Run||0));   // (Drive and Jump hold the arms away from the body)
+  for(const [m,i] of h.press)m.morphTargetInfluences[i]=pr;
   // cloth: springs driven by the body's acceleration in its own frame (forward / sideways)
   const x=h.g.position.x,z=h.g.position.z;h.t+=dt;
-  if(h.last&&dt>0&&!o.seated){const vx=(x-h.last.x)/dt,vz=(z-h.last.z)/dt,f=Math.min(1,dt*10);
+  // at the wheel the cloth rests (and getting in or out, a jump in position, is no acceleration)
+  if(o.seated){h.last=null;h.ax=h.az=h.vx=h.vz=0;for(const c of h.cloth)c.pp=c.pv=c.rr=c.rv=0;return;}
+  if(h.last&&dt>0){const vx=(x-h.last.x)/dt,vz=(z-h.last.z)/dt,f=Math.min(1,dt*10);
     h.ax+=((vx-h.vx)/dt-h.ax)*f;h.az+=((vz-h.vz)/dt-h.az)*f;h.vx=vx;h.vz=vz;}
   else{h.ax*=0.8;h.az*=0.8;h.vx=h.vz=0;}
   h.last={x,z};
@@ -924,11 +936,15 @@ function animHero(h,dt,o){
   h.root.updateMatrixWorld(true);
   for(const c of h.cloth){
     const flutter=c.n==='cloth_shirt_B'?0.05*Math.min(1,sp/4)*Math.sin(h.t*9.3):0;
-    const tp=Math.max(-c.max,Math.min(c.max,c.k*fw))+flutter,tr=Math.max(-c.max,Math.min(c.max,-c.k*sd));
-    c.pv+=(60*(tp-c.p)-8*c.pv)*dt;c.p+=c.pv*dt;c.rv+=(60*(tr-c.r)-8*c.rv)*dt;c.r+=c.rv*dt;
+    const tp=clampR(c.k*fw+flutter,c.p),tr=clampR(-c.k*sd,c.r);
+    c.pv+=(60*(tp-c.pp)-8*c.pv)*dt;c.pp+=c.pv*dt;c.rv+=(60*(tr-c.rr)-8*c.rv)*dt;c.rr+=c.rv*dt;
+    // (a spring overshoots: hold it within its limits, stopping there)
+    const p2=clampR(c.pp,c.p),r2=clampR(c.rr,c.r);
+    if(p2!==c.pp){c.pp=p2;c.pv=0;}
+    if(r2!==c.rr){c.rr=r2;c.rv=0;}
     c.b.getWorldQuaternion(_hq2).invert();
-    _hv.set(Math.cos(yaw),0,-Math.sin(yaw)).applyQuaternion(_hq2);_hq.setFromAxisAngle(_hv,c.p);c.b.quaternion.multiply(_hq);
-    _hv.set(Math.sin(yaw),0,Math.cos(yaw)).applyQuaternion(_hq2);_hq.setFromAxisAngle(_hv,c.r);c.b.quaternion.multiply(_hq);
+    _hv.set(Math.cos(yaw),0,-Math.sin(yaw)).applyQuaternion(_hq2);_hq.setFromAxisAngle(_hv,c.pp);c.b.quaternion.multiply(_hq);
+    _hv.set(Math.sin(yaw),0,Math.cos(yaw)).applyQuaternion(_hq2);_hq.setFromAxisAngle(_hv,c.rr);c.b.quaternion.multiply(_hq);
   }
 }
 function seatPerson(p,car){ // sitting at the wheel: reclined at the hips, thighs forward, hands on the wheel
