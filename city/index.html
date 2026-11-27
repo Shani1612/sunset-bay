@@ -25,8 +25,6 @@ canvas#c{position:fixed;inset:0;width:100%;height:100%;display:block}
 #hint{position:absolute;bottom:90px;left:50%;transform:translateX(-50%);font:700 16px var(--font)}
 #hint:empty{display:none}
 #speed{position:absolute;left:20px;bottom:18px;text-align:left}
-#repair{position:absolute;left:20px;bottom:150px;pointer-events:auto;cursor:pointer;font-weight:900}
-body.touch #repair{left:auto;right:20px;bottom:380px}
 #speed .n{font:900 22px/1 var(--font)}
 #speed .v{direction:ltr;font:900 56px/1 var(--font)}
 #speed .v small{font-size:16px;margin-left:6px}
@@ -73,13 +71,12 @@ body.touch #speed .bar{width:140px}
   <div id="job" class="out"></div>
   <div id="msg" class="out"></div>
   <div id="hint" class="panel"></div>
-  <div id="repair" class="panel" hidden>🔧 תיקון הרכב <kbd>R</kbd></div>
   <div id="speed" class="out" hidden><div class="n"></div><div class="v">0<small>קמ"ש</small></div><div class="bar"><i></i></div></div>
   <div id="mapwrap"><canvas id="map" width="500" height="400"></canvas></div>
   <div id="help" class="panel">
     <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> הליכה ונהיגה · <kbd>Shift</kbd> ריצה<br>
     <kbd>Space</kbd> קפיצה / בלם יד · <kbd>F</kbd> כניסה ויציאה מרכב<br>
-    <kbd>H</kbd> צופר · <kbd>R</kbd> תיקון הרכב · עכבר: להסתכל מסביב (לחיצה נועלת)<br>
+    <kbd>H</kbd> צופר · עכבר: להסתכל מסביב (לחיצה נועלת)<br>
     <kbd>C</kbd> מצלמה · <kbd>Tab</kbd> הסתרת העזרה · <kbd>P</kbd> השהיה
   </div>
 </div>
@@ -1115,14 +1112,12 @@ const CAR_LOD=MOBILE?25:35;       // metres: nearer cars get the detailed model 
 function makeCar(kind,hex){
   const T=CARS[kind],X=T.x,g=new THREE.Group(),bodyG=new THREE.Group();g.add(bodyG);
   const paint=paintMat(hex),lamp=lampMat(T);
-  const meshes=[];
-  const add=(parts,parent,grp)=>{for(const q of parts){if(q.name==='Plate')continue;   // (the game draws its own plates there)
-    const m=new THREE.Mesh(q.geo,q.name==='Paint'?paint:q.name==='Lamps'?lamp.mat:q.mat);m.castShadow=!q.mat.transparent;m.receiveShadow=true;parent.add(m);
-    meshes.push({m,name:q.name,grp});}};
+  const add=(parts,parent)=>{for(const q of parts){if(q.name==='Plate')continue;   // (the game draws its own plates there)
+    const m=new THREE.Mesh(q.geo,q.name==='Paint'?paint:q.name==='Lamps'?lamp.mat:q.mat);m.castShadow=!q.mat.transparent;m.receiveShadow=true;parent.add(m);}};
   const near=new THREE.Group(),far=new THREE.Group();bodyG.add(near,far);
-  add(T.body.parts,near,'near');add(T.lod1.parts,far,'far');far.visible=false;
+  add(T.body.parts,near);add(T.lod1.parts,far);far.visible=false;
   // the driver's door turns about its hinge (vertical, at its front edge)
-  const doorG=new THREE.Group();doorG.position.set(X.door_hinge[0],X.door_hinge[1],X.door_hinge[2]);near.add(doorG);add(T.door.parts,doorG,'door');
+  const doorG=new THREE.Group();doorG.position.set(X.door_hinge[0],X.door_hinge[1],X.door_hinge[2]);near.add(doorG);add(T.door.parts,doorG);
   const wheels=[];
   for(const front of [true,false])for(const sx of [1,-1]){
     const piv=new THREE.Group();piv.position.set(sx*X.track,X.wheel_r,front?X.wheels_front:X.wheels_rear);
@@ -1140,7 +1135,7 @@ function makeCar(kind,hex){
   const c={g,bodyG,near,far,wheels,lamp,hex,kind,len:T.len,hw:X.half_width,wb:X.wheels_front-X.wheels_rear,R:X.wheel_r,vmax:X.vmax,
     x:0,z:0,y:0,a:0,v:0,vx:0,vz:0,steer:0,mode:'parked',braking:false,roll:0,pitch:0,rollV:0,pitchV:0,prevA:0,prevV:0,
     driver:null,cruise:rand(10.5,13.5),ghost:0,stuck:0,bump:0,ind:0,indHold:0,lod:0,
-    door:{g:doorG,a:0,open:X.door_open,hold:0,hinge:{x:X.door_hinge[0],z:X.door_hinge[2]}},gear:1,yr:0,parts:meshes,toe:[0,0,0,0],engine:1,
+    door:{g:doorG,a:0,open:X.door_open,hold:0},gear:1,yr:0,
     susp:{h:0,hv:0,p:0,pv:0,r:0,rv:0,w:[{x:X.track,z:X.wheels_front},{x:-X.track,z:X.wheels_front},{x:X.track,z:X.wheels_rear},{x:-X.track,z:X.wheels_rear}].map(W=>Object.assign(W,{g:0,off:0}))},
     seat:{x:X.seat[0],y:X.seat[1],z:X.seat[2]}};
   setLamps(c,{drl:0,tail:0,brake:0,indL:0,indR:0,reverse:0});
@@ -1187,8 +1182,7 @@ function carVisuals(c,dt){
   suspension(c,dt);
   c.g.position.set(c.x,c.y,c.z);c.g.rotation.y=c.a;
   for(let i=0;i<4;i++){const w=c.wheels[i];w.piv.position.y=c.R+c.susp.w[i].off;
-    if(!(c.hand&&!w.front))w.spin.rotation.x+=c.v*dt/c.R;
-    const toe=c.toe?c.toe[i]:0;w.piv.rotation.y=(w.front?c.steer:0)+toe;w.piv.rotation.z=toe*0.6;}
+    if(!(c.hand&&!w.front))w.spin.rotation.x+=c.v*dt/c.R;if(w.front)w.piv.rotation.y=c.steer;}
   // near or far model (the far one has its wheels in it)
   const dc=Math.hypot(c.x-camera.position.x,c.z-camera.position.z),L=dc>CAR_LOD+(c.lod?-2:2)?1:0;
   if(L!==c.lod){c.lod=L;c.near.visible=!L;c.far.visible=!!L;for(const w of c.wheels)w.piv.visible=!L;}
@@ -1342,7 +1336,6 @@ function physStep(c,inp,h){
   let Tq=P.Tq*torqueCurve(c.rpm);Tq=Math.min(Tq,P.Pw/(c.rpm*0.10472));
   // (through the gearbox and the spinning parts: about 0.72 of the engine's force reaches the car's motion)
   let Fdrive=c.shiftT>0.25?0:thr*Tq*ratio*P.fd*0.72/P.R*(c.gear===-1?-1:1);
-  Fdrive*=c.engine||1;
   if(u>P.vmax&&Fdrive>0)Fdrive=0;if(u<-9&&Fdrive<0)Fdrive=0;             // (a limiter; reverse to 32 km/h)
   // loads on the wheels: static, shifted by the last step's accelerations
   const ax=c.axs||0,ay=c.ays||0,mg=P.m*GRAV;
@@ -1351,7 +1344,7 @@ function physStep(c,inp,h){
   let sU=0,sW=0,tq=0,slide=0;
   const driven=P.drive==='awd'?[0.2,0.2,0.3,0.3]:[0.5,0.5,0,0];
   for(let i=0;i<4;i++){
-    const Wh=P.W[i],d=(Wh.front?c.steer:0)+(c.toe?c.toe[i]:0),cd=Math.cos(d),sd=Math.sin(d);
+    const Wh=P.W[i],d=Wh.front?c.steer:0,cd=Math.cos(d),sd=Math.sin(d);
     const ui=u-r*Wh.x,wi=w+r*Wh.z,uw=ui*cd+wi*sd,ww=-ui*sd+wi*cd;
     const lim=MU*Fz[i];
     let Fx=Fdrive*driven[i];
@@ -1435,9 +1428,9 @@ function collideCar(c){
   let impact=0;const A=carBox(c);
   for(const s of SOLIDS){
     if(c.x<s.x0-6||c.x>s.x1+6||c.z<s.z0-6||c.z>s.z1+6)continue;
-    const hit=boxHit(A,rectBox(s));if(hit){const im=resolve(c,null,hit);impact=Math.max(impact,im);damageCar(c,hit.p,hit.n,im);A.x=c.x;A.z=c.z;}
+    const hit=boxHit(A,rectBox(s));if(hit){impact=Math.max(impact,resolve(c,null,hit));A.x=c.x;A.z=c.z;}
   }
-  for(const q of postsNear(c.x,c.z)){const hit=circleHit(A,q);if(hit){const im=resolve(c,null,hit);impact=Math.max(impact,im);damageCar(c,hit.p,hit.n,im);A.x=c.x;A.z=c.z;}}
+  for(const q of postsNear(c.x,c.z)){const hit=circleHit(A,q);if(hit){impact=Math.max(impact,resolve(c,null,hit));A.x=c.x;A.z=c.z;}}
   for(const o of ALLCARS){
     if(o===c||o.hidden||Math.abs(o.x-c.x)>6||Math.abs(o.z-c.z)>6)continue;
     const hit=boxHit(A,carBox(o));if(!hit)continue;
@@ -1447,8 +1440,7 @@ function collideCar(c){
       else freeCar(o,Math.sin(o.a)*o.v,Math.cos(o.a)*o.v);              // a real hit: it becomes a body of its own
     }
     if(o.mode==='parked'){o.mode='free';o.park=true;o.yr=0;}
-    const im=resolve(c,o,hit);impact=Math.max(impact,im);
-    damageCar(c,hit.p,hit.n,im);damageCar(o,hit.p,{x:-hit.n.x,z:-hit.n.z},im);A.x=c.x;A.z=c.z;
+    impact=Math.max(impact,resolve(c,o,hit));A.x=c.x;A.z=c.z;
   }
   return impact;
 }
@@ -1495,166 +1487,6 @@ function skidMarks(c){
     SKID.g.attributes.position.needsUpdate=true;SKID.g.setDrawRange(0,SKID.n*6);
     wh.mark={x:px,z:pz};
   }
-}
-
-
-// =====================================================================================================
-// crash damage: the body crumples where it is hit, and only there, more the harder the hit; windows there shatter,
-// lamps there go dark, pieces of bumper, grille and lamp break off and fall, sparks and shards fly. A hit by a wheel
-// knocks it out of line (the car pulls), a heavy hit at the front costs the engine power and it steams.
-// R (or the button) repairs the car.
-// =====================================================================================================
-const LENS_U=(6+0.5)/8;
-function hash3(x,y,z){const h=Math.sin(x*127.1+y*311.7+z*74.7)*43758.5453;return h-Math.floor(h);}
-function ownGeometry(c){   // the car's own copy of its geometry (until it is first hit it shares its model's)
-  if(c.own)return;c.own=true;
-  for(const P of c.parts){P.tpl=P.m.geometry;P.m.geometry=P.tpl.clone();P.orig=P.tpl.attributes.position.array;}
-}
-function repairCar(c){
-  if(!c.own)return;
-  for(const P of c.parts){P.m.geometry.dispose();P.m.geometry=P.tpl;}
-  c.own=false;c.toe=[0,0,0,0];c.engine=1;c.dmg=0;c.steamT=0;
-  for(const w of c.wheels)w.piv.rotation.z=0;
-  if(c===player.car)flash('הרכב תוקן','#7ee08a');
-}
-function damageCar(c,p,n,speed){
-  if(!c.parts||speed<2.2)return;
-  if(clock-(c.dmgT||-9)<0.15&&speed<(c.dmgV||0)*1.3)return;
-  c.dmgT=clock;c.dmgV=speed;
-  const ca=Math.cos(c.a),sa=Math.sin(c.a),dx=p.x-c.x,dz=p.z-c.z;
-  // the hit in the car's own frame (x to its left, y up, z forward); n: the push, into the car
-  const lx=dx*ca-dz*sa,lz=dx*sa+dz*ca,nx=n.x*ca-n.z*sa,nz=n.x*sa+n.z*ca;
-  const D=Math.min(0.42,0.0035*speed*speed),R=0.32+0.035*speed,yc=0.55,cx=lx-nx*0.05,cz=lz-nz*0.05;
-  sparks(p,n,speed);
-  if(D<0.015)return;
-  ownGeometry(c);
-  const X=CARS[c.kind].x,hinge=c.door.hinge,toWorld=(x,y,z)=>({x:c.x+x*ca+z*sa,y:c.y+y,z:c.z-x*sa+z*ca});
-  const pieces=[];let glassBroke=0,lampBroke=0;
-  for(const P of c.parts){
-    const g=P.m.geometry,pos=g.attributes.position,a=pos.array,o=P.orig,door=P.grp==='door';
-    const W=new Float32Array(pos.count);let moved=false;
-    for(let i=0,k=0;i<a.length;i+=3,k++){
-      const x=a[i]+(door?hinge.x:0),y=a[i+1],z=a[i+2]+(door?hinge.z:0);
-      const rx=x-cx,rz=z-cz,depth=rx*nx+rz*nz;
-      if(depth<-0.3)continue;
-      const ry=(y-yc)*0.75,lat2=rx*rx+rz*rz-depth*depth+ry*ry;
-      if(lat2>=R*R)continue;
-      const f=1-Math.sqrt(Math.max(0,lat2))/R,w=f*f*(3-2*f)*Math.exp(-Math.max(depth,0)/0.7);
-      if(w<0.01)continue;
-      W[k]=w;
-      // pushed in along the hit, rippled (crumpling), a hood or a boot lid buckling up
-      const h=hash3(o[i],o[i+1],o[i+2])-0.5,s=D*w;
-      let px=nx*s-nz*h*0.22*s,pz=nz*s+nx*h*0.22*s,py=(h*0.4+(y>0.72?0.3:0))*s;
-      // no point further than 0.5 m from where it was
-      const ex=a[i]+px-o[i],ey=a[i+1]+py-o[i+1],ez=a[i+2]+pz-o[i+2],el=Math.hypot(ex,ey,ez);
-      if(el>0.5){const q=0.5/el;px=o[i]+ex*q-a[i];py=o[i+1]+ey*q-a[i+1];pz=o[i+2]+ez*q-a[i+2];}
-      a[i]+=px;a[i+1]+=py;a[i+2]+=pz;moved=true;
-    }
-    if(!moved)continue;
-    pos.needsUpdate=true;
-    const idx=g.index?g.index.array:null;
-    // windows shatter where the hit is
-    if(P.name==='Glass'&&D>0.05&&idx){for(let t=0;t<idx.length;t+=3)if(W[idx[t]]>0.3||W[idx[t+1]]>0.3||W[idx[t+2]]>0.3){
-      if(idx[t]!==idx[t+1]){glassBroke++;idx[t+1]=idx[t+2]=idx[t];}}g.index.needsUpdate=true;}
-    // lamps there go dark
-    if(P.name==='Lamps'&&g.attributes.uv){const uv=g.attributes.uv;for(let k=0;k<pos.count;k++)if(W[k]>0.25&&uv.getX(k)!==LENS_U){uv.setX(k,LENS_U);lampBroke++;}uv.needsUpdate=true;}
-    // pieces break off: the bumper's and grille's black parts, lamps, the bumper's cover low down in a hard hit
-    if(P.grp==='near'&&idx&&(P.name==='Trim'||P.name==='Lamps'||(P.name==='Paint'&&D>0.2))&&D>0.12){
-      // (in up to four pieces: left and right of the hit, high and low)
-      const lim=P.name==='Paint'?0.6:0.42,groups={};
-      for(let t=0;t<idx.length;t+=3){
-        const i0=idx[t],i1=idx[t+1],i2=idx[t+2];if(i0===i1)continue;
-        if(W[i0]>lim&&W[i1]>lim&&W[i2]>lim&&(P.name!=='Paint'||a[i0*3+1]<0.66)){
-          const gx=(a[i0*3]-cx)*nz-(a[i0*3+2]-cz)*nx>0?1:0,gy=a[i0*3+1]>0.55?2:0,key=gx+gy;
-          const L=groups[key]||(groups[key]={tris:[],at:[]});if(L.tris.length<1500){L.tris.push(i0,i1,i2);L.at.push(t);}
-        }
-      }
-      for(const k in groups){const G=groups[k];if(G.at.length<12)continue;          // (crumbs stay on the car)
-        for(const t of G.at)idx[t+1]=idx[t+2]=idx[t];
-        g.index.needsUpdate=true;pieces.push({tris:G.tris,a,uv:g.attributes.uv?g.attributes.uv.array:null,mat:P.m.material});}
-    }
-    g.computeVertexNormals();g.computeBoundingSphere();
-  }
-  for(const pc of pieces)breakOff(c,pc,toWorld,n,speed);
-  if(glassBroke)bits(p,n,Math.min(60,10+glassBroke),[0.75,0.85,0.9],speed);
-  if(lampBroke)bits(p,n,14,[0.9,0.35,0.2],speed);
-  // the wheels near the hit are knocked out of line; a hard hit at the front hurts the engine
-  if(!c.toe)c.toe=[0,0,0,0];
-  c.wheels.forEach((w,i)=>{const wx=w.piv.position.x,wz=w.piv.position.z;
-    if(Math.hypot(wx-cx,wz-cz)<0.75&&D>0.07)c.toe[i]=clamp(c.toe[i]+(hash3(cx,cz,i)-0.5)*D*0.8+(i%2?-1:1)*D*0.15,-0.22,0.22);});
-  if(cz>X.wheels_front-0.4&&D>0.08)c.engine=Math.max(0.25,(c.engine||1)-D*1.4);
-  c.dmg=(c.dmg||0)+D;
-  if(c===player.car)camShake=Math.max(camShake,Math.min(0.6,speed*0.035));
-}
-// a piece of the car falls off: its triangles become a body of their own
-const DEBRIS=[];
-function breakOff(c,pc,toWorld,n,speed){
-  const P=[],tris=pc.tris;let cx=0,cy=0,cz=0;
-  for(const i of tris){const w=toWorld(pc.a[i*3],pc.a[i*3+1],pc.a[i*3+2]);P.push(w);cx+=w.x;cy+=w.y;cz+=w.z;}
-  cx/=P.length;cy/=P.length;cz/=P.length;
-  const arr=new Float32Array(P.length*3);P.forEach((w,k)=>{arr[k*3]=w.x-cx;arr[k*3+1]=w.y-cy;arr[k*3+2]=w.z-cz;});
-  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(arr,3));
-  const uv=new Float32Array(P.length*2);                                  // (each corner keeps its atlas texel)
-  if(pc.uv)tris.forEach((i,k)=>{uv[k*2]=pc.uv[i*2];uv[k*2+1]=pc.uv[i*2+1];});
-  g.setAttribute('uv',new THREE.BufferAttribute(uv,2));
-  g.computeVertexNormals();
-  const m=new THREE.Mesh(g,pc.mat.clone());m.material.side=THREE.DoubleSide;m.castShadow=true;m.position.set(cx,cy,cz);scene.add(m);
-  const s=speed*0.22;
-  DEBRIS.push({m,v:{x:n.x*-s+rand(-1,1),y:rand(1.2,2.8),z:n.z*-s+rand(-1,1)},w:{x:rand(-5,5),y:rand(-5,5),z:rand(-5,5)},t:0,rest:false});
-  if(DEBRIS.length>36){const d=DEBRIS.shift();scene.remove(d.m);d.m.geometry.dispose();}
-  return g;
-}
-function updateDebris(dt){
-  for(const d of DEBRIS){
-    d.t+=dt;if(d.rest)continue;
-    d.v.y-=GRAV*dt;d.m.position.x+=d.v.x*dt;d.m.position.y+=d.v.y*dt;d.m.position.z+=d.v.z*dt;
-    d.m.rotation.x+=d.w.x*dt;d.m.rotation.y+=d.w.y*dt;d.m.rotation.z+=d.w.z*dt;
-    const gy=groundY(d.m.position.x,d.m.position.z)+0.04;
-    if(d.m.position.y<gy){d.m.position.y=gy;
-      if(Math.abs(d.v.y)<0.8&&Math.hypot(d.v.x,d.v.z)<0.4){d.rest=true;continue;}
-      d.v.y=-d.v.y*0.3;d.v.x*=0.6;d.v.z*=0.6;d.w.x*=0.5;d.w.y*=0.5;d.w.z*=0.5;}
-  }
-}
-// sparks (bright, short) and bits (glass, lamp) flying from a hit
-let FX=null,DOT=null;
-function dotTex(){if(DOT)return DOT;const cv=document.createElement('canvas');cv.width=cv.height=32;const x=cv.getContext('2d'),gr=x.createRadialGradient(16,16,0,16,16,16);
-  gr.addColorStop(0,'rgba(255,255,255,1)');gr.addColorStop(0.5,'rgba(255,255,255,0.7)');gr.addColorStop(1,'rgba(255,255,255,0)');x.fillStyle=gr;x.fillRect(0,0,32,32);
-  return DOT=new THREE.CanvasTexture(cv);}
-function fxInit(){
-  const mk=(n,add,size)=>{const g=new THREE.BufferGeometry(),p=new Float32Array(n*3),c=new Float32Array(n*3);
-    g.setAttribute('position',new THREE.BufferAttribute(p,3));g.setAttribute('color',new THREE.BufferAttribute(c,3));
-    const m=new THREE.PointsMaterial({size,map:dotTex(),vertexColors:true,transparent:true,depthWrite:false,blending:add?THREE.AdditiveBlending:THREE.NormalBlending,sizeAttenuation:true});
-    const pts=new THREE.Points(g,m);pts.frustumCulled=false;scene.add(pts);
-    return {g,p,c,n,v:new Float32Array(n*3),life:new Float32Array(n),i:0};};
-  FX={sp:mk(240,true,0.09),bi:mk(360,false,0.06),st:mk(160,false,0.55)};
-}
-function emit(S,pos,vel,col,life){const i=S.i;S.i=(S.i+1)%S.n;S.p.set([pos.x,pos.y,pos.z],i*3);S.v.set([vel.x,vel.y,vel.z],i*3);S.c.set(col,i*3);S.life[i]=life;}
-function sparks(p,n,speed){
-  if(!FX)fxInit();const y=0.45;
-  for(let k=0;k<Math.min(60,speed*4);k++)emit(FX.sp,{x:p.x,y,z:p.z},{x:-n.x*rand(1,4)+rand(-3,3),y:rand(0.5,4),z:-n.z*rand(1,4)+rand(-3,3)},[1,rand(0.45,0.8),0.15],rand(0.2,0.6));
-}
-function bits(p,n,count,col,speed){
-  if(!FX)fxInit();
-  for(let k=0;k<count;k++)emit(FX.bi,{x:p.x+rand(-0.3,0.3),y:rand(0.4,1.1),z:p.z+rand(-0.3,0.3)},{x:-n.x*rand(1,3)*(1+speed*0.05)+rand(-2,2),y:rand(0.5,3.5),z:-n.z*rand(1,3)*(1+speed*0.05)+rand(-2,2)},
-    col.map(v=>v*rand(0.8,1.1)),rand(3,8));
-}
-function updateFX(dt){
-  if(!FX)return;
-  for(const k of ['sp','bi','st']){const S=FX[k];let any=false;
-    for(let i=0;i<S.n;i++){if(S.life[i]<=0)continue;any=true;S.life[i]-=dt;
-      if(S.life[i]<=0){S.p[i*3+1]=-50;continue;}
-      const b=i*3;
-      if(k==='st'){S.v[b+1]+=0.4*dt;}else S.v[b+1]-=GRAV*dt;
-      S.p[b]+=S.v[b]*dt;S.p[b+1]+=S.v[b+1]*dt;S.p[b+2]+=S.v[b+2]*dt;
-      if(k!=='st'){const gy=groundY(S.p[b],S.p[b+2])+0.01;if(S.p[b+1]<gy){S.p[b+1]=gy;S.v[b]*=0.3;S.v[b+1]*=-0.2;S.v[b+2]*=0.3;}}
-      if(k==='sp')for(let j=0;j<3;j++)S.c[b+j]*=Math.exp(-dt*3);
-    }
-    if(any){S.g.attributes.position.needsUpdate=true;S.g.attributes.color.needsUpdate=true;}}
-  // steam from a hurt engine
-  for(const c of ALLCARS){if(!c.engine||c.engine>0.65||c.lod||!c.g.visible)continue;
-    c.steamT=(c.steamT||0)-dt;if(c.steamT>0)continue;c.steamT=0.08;
-    const X=CARS[c.kind].x,z=X.wheels_front-0.2;
-    emit(FX.st,{x:c.x+Math.sin(c.a)*z+rand(-0.2,0.2),y:c.y+1.0,z:c.z+Math.cos(c.a)*z+rand(-0.2,0.2)},{x:rand(-0.2,0.2),y:rand(0.4,0.9),z:rand(-0.2,0.2)},[0.78,0.78,0.8],rand(1.2,2.2));}
 }
 
 // =====================================================================================================
@@ -1862,7 +1694,6 @@ function updateCamera(dt){
   camPos.copy(want);camera.position.copy(camPos);
   if(camera.position.y<0.4)camera.position.y=0.4;
   camera.lookAt(camTarget);
-  if(camShake>0.002){camera.position.x+=rand(-1,1)*camShake*0.12;camera.position.y+=rand(-1,1)*camShake*0.08;camera.rotation.z+=rand(-1,1)*camShake*0.02;camShake*=Math.exp(-dt*7);}
   // the sun's shadow box follows the camera's target
   const sx=Math.round(camTarget.x),sz=Math.round(camTarget.z);
   sun.target.position.set(sx,0,sz);sun.position.set(sx+SUN.x*260,SUN.y*260,sz+SUN.z*260);
@@ -2033,7 +1864,6 @@ function updateHUD(dt){
   hudT-=dt;if(hudT>0)return;hudT=0.1;
   drawMap();
   const sp=$('speed');sp.hidden=!player.car;
-  $('repair').hidden=!(player.car&&player.car.own);
   if(player.car){const v=Math.round(Math.abs(player.car.v)*3.6),gr=player.car.gear;
     sp.querySelector('.n').textContent=CAR_NAME[player.car.kind]+'  ·  '+(gr===-1?'R':gr===0?'N':'D'+gr);
     sp.querySelector('.v').firstChild.nodeValue=v;sp.querySelector('.bar i').style.width=Math.min(100,v/1.6)+'%';}
@@ -2057,14 +1887,12 @@ addEventListener('keydown',e=>{
   if(e.code==='KeyF'||e.code==='KeyE'){if(player.car)exitCar();else{const c=nearestCar();if(c)enterCar(c);}}
   if(e.code==='KeyH'&&player.car){hornT=0;horn(player.car);for(const q of peds)if(Math.hypot(q.x-player.x,q.z-player.z)<12)flee(q,player.x,player.z,3);}
   if(e.code==='KeyC')camFar=!camFar;
-  if(e.code==='KeyR'&&player.car)repairCar(player.car);
   if(e.code==='Tab')$('help').hidden=!$('help').hidden;
   if(e.code==='KeyP')paused=!paused;
 });
 addEventListener('keyup',e=>keys.delete(e.code));
-$('repair').addEventListener('click',()=>{if(player.car)repairCar(player.car);});
 addEventListener('blur',()=>keys.clear());
-let drag=false,lx=0,ly=0,camShake=0;
+let drag=false,lx=0,ly=0;
 function look(dx,dy){camYaw-=dx*0.0032;camPitch=clamp(camPitch+dy*0.0025,-0.3,1.1);lookT=1.6;}
 canvas.addEventListener('mousedown',e=>{if(state!=='play')return;drag=true;lx=e.clientX;ly=e.clientY;if(!MOBILE&&canvas.requestPointerLock){try{const r=canvas.requestPointerLock();if(r&&r.catch)r.catch(()=>{});}catch(e){}}});
 addEventListener('mouseup',()=>drag=false);
@@ -2084,7 +1912,6 @@ canvas.addEventListener('wheel',e=>{camFar=e.deltaY>0;},{passive:true});
   btn('tJ',()=>keys.add('Space'),()=>keys.delete('Space'));
   btn('tR',()=>{touch.run=!touch.run;$('tR').classList.toggle('on',touch.run);});
   btn('tH',()=>{if(player.car){hornT=0;horn(player.car);}});
-  btn('repair',()=>{if(player.car)repairCar(player.car);});
 })();
 
 // =====================================================================================================
@@ -2105,7 +1932,6 @@ function update(dt){
     for(const q of peds){if(q.mode==='knocked'||q.mode==='ride'||Math.abs(q.x-c.x)>4||Math.abs(q.z-c.z)>4)continue;
       for(const o of carCircles(c))if(Math.hypot(q.x-o.x,q.z-o.z)<c.hw+0.3){knock(q,c);break;}}}
   updateJobs(dt);
-  updateDebris(dt);updateFX(dt);
   updateCamera(dt);
   drvT-=dt;if(drvT<=0){drvT=0.4;updateDrivers();}
   for(const c of ALLCARS){
@@ -2151,7 +1977,7 @@ $('play').addEventListener('click',startGame);
 requestAnimationFrame(frame);
 // for automated checks
 window.__city={get state(){return state;},start:startGame,player,cars:ALLCARS,peds,keys,camera,renderer,scene,NODES,SIGNALS,CHUNKS,NPC_T,DRIVERS,knock,npcLOD,get npcIds(){return NPC_IDS;},
-  get job(){return job;},get money(){return money;},cancelJob(){if(job)endJob(false,'');jobCool=0;},light,enterCar,exitCar,nearestCar,freeCar,CARS,setLamps,boxHit,carBox,carSpec,SOLIDS,Xs,Zs,groundY,get skid(){return SKID;},get debris(){return DEBRIS;},repairCar,
+  get job(){return job;},get money(){return money;},cancelJob(){if(job)endJob(false,'');jobCool=0;},light,enterCar,exitCar,nearestCar,freeCar,CARS,setLamps,boxHit,carBox,carSpec,SOLIDS,Xs,Zs,groundY,get skid(){return SKID;},
   setYaw(v){camYaw=v;lookT=2;},setPitch(v){camPitch=v;},
   step(n,dt){dt=dt||1/60;for(let i=0;i<n;i++)update(dt);renderer.render(scene,camera);},
   tick(n,dt){dt=dt||1/60;for(let i=0;i<n;i++)update(dt);}};
