@@ -88,6 +88,13 @@ hips), and `ArmsDownRun` for Run (only the upper arm is by the body). Each key i
 measured on the cloth's faces as well as its corners. The game sets each key to
 the weight of its animations; driving and jumping hold the arms away.
 
+For the game it also fixes two of MB-Lab's textures (the city's people get the
+same): the eyelash texture is grey cards with the lashes drawn on them and no
+transparency, so it is replaced by dark lashes whose alpha is the lashes (no
+white strips along the eyelids); and the skin texture's white background is
+filled from the edges of its UV islands, so the smaller mipmaps don't draw light
+lines along the seams.
+
 It also adds cloth bones for the back of the shirt's hem, the sleeves and the
 jeans legs. Each animation has the cloth swing built in. In the game, springs on
 these bones also react to starting, stopping and turning. Each spring is held
@@ -125,3 +132,97 @@ How the game plays it:
 - If `player.glb` can't load, the game uses its simple figure.
 
 `city/build_page.py` makes the published page.
+
+## The city's people (`city/assets/npc/`)
+
+The pedestrians and drivers are eight realistic characters made the way the
+player is: MB-Lab bodies, the player's clothes fitted to each, hair, and the
+same animation and checks.
+
+| | Body (MB-Lab phenotype, body type) | Hair |
+|---|---|---|
+| `f_ca01` | Mediterranean woman, average | chin-length bob, dark brown |
+| `f_af01` | African woman, average | full natural curls, black |
+| `f_as01` | East Asian woman, slim | high ponytail, black |
+| `f_la01` | Latin American woman, rounded | bun, chestnut |
+| `m_af01` | African man, athletic | fade, black |
+| `m_as01` | East Asian man, slim | short, swept to the side, black |
+| `m_ca01` | Nordic man, average | crew cut, dark blond |
+| `m_la01` | Central American man, heavy, older | short and combed, grey |
+
+How they are made (`characters/npc/<id>.json` holds each one's eye colour, hair
+style and hair colour):
+
+```
+blender -b -P blender/make_npc_bodies.py -- <MB-Lab checkout> characters/npc
+blender -b -P blender/dress_character.py -- characters/npc/<id>.glb characters/npc/dressed characters/npc/<id>.json
+blender -b -P blender/make_hair.py -- <MB-Lab checkout> characters/npc/dressed/<id>_dressed.blend characters/npc/<id>.blend <style> <r,g,b>
+blender -b -P blender/export_player.py -- characters/npc/<id>.blend city/assets/npc/<id>.glb --npc
+python3 blender/npc_manifest.py city/assets/npc
+```
+
+1. **Bodies:** `make_npc_bodies.py` runs [MB-Lab](https://github.com/animate1978/MB-Lab)
+   without its interface. Each character gets its template (woman or man), a
+   phenotype (face and build of a population), a body type, an age, mass and
+   tone. The body is finalized with MB-Lab's skeleton (the player's) and saved
+   like `Human.glb`.
+2. **Clothes:** `dress_character.py` carries the player's finished T-shirt,
+   jeans, socks and sneakers onto the body:
+   - The two bodies' skins are matched through MB-Lab's shared UV layout.
+   - The clothes move as the skin under them does.
+   - They are set off the new body again: the collar, the sleeve ends and the
+     waistband keep the player's gaps, and the shirt hangs from the chest.
+   - They are checked like the player's.
+3. **Hair:** `make_hair.py` builds hair as meshes a game can draw.
+   - **Cap:** MB-Lab's scalp region, lifted off the skin by a thickness that
+     varies around the head and thins at the hairline.
+   - **Shells:** copies of the cap further out, with a strand texture whose
+     transparency grows outward, for volume and a soft outline.
+   - **Parts per style:** a bob's hanging hair, a ponytail with its hair tie, a
+     bun.
+   - **Rigging:** the hair is weighted to the head. The scalp under it is hidden
+     by the body's mask, as the skin under the clothes is.
+4. **Game version:** `export_player.py --npc` uses the player's pipeline. Its
+   measures (the hem's height, where the sleeves start, the feet's places) are
+   carried to each body by its skeleton's landmarks.
+   - **Gait:** the stride scales with the leg length, and the cycle time with its
+     square root.
+   - **Arms:** they hang as far outside the hips as the player's do.
+   - **Animations:** Idle, Walk, Run, Drive and Lie (knocked down: on the back,
+     the head, back, seat, arms and heels solved down onto the ground).
+5. **Checks:** every frame of every animation and the Walk/Run blends are
+   checked as for the player, with the hair as a piece of cloth:
+   - no scalp through it, no skin into it, none of it through the shirt;
+   - skin under the cloth that would still come out through it is hidden by the
+     mask. That covers a heavy body's armpit as the arms come down: up to a few
+     dozen skin points, only where the cloth covers them.
+
+   The reports are `city/assets/npc/<id>_report.json`. The only finding is the
+   one the player has, at the wheel: the shirt's hem against the jeans in the
+   lap, inside the car. `npc_manifest.py` leaves out anyone with other findings.
+6. **Two levels of detail in one file, on one skeleton:**
+   - **LOD0** (near, 33–37k triangles, 5 draw calls): lighter garments and
+     shoes than the player's, with the hems at full detail.
+   - **LOD1** (from 22 m, 12 m on phones; about 9k triangles, 3 draw calls):
+     the body welded and decimated, with the head kept finer, and one hair layer.
+     It is checked with a 1 cm tolerance.
+   - **Colours:** the garments, the eyes and the nails share one material: a
+     colour per vertex times an 8×1 palette texture (shirt, jeans, shoes). Each
+     pedestrian gets their own palette, so their own clothes colours.
+   - **File:** skin weights, texture coordinates and colours are stored as
+     integers (core glTF), about 1.8–2 MB per person.
+
+In the game (`city/index.html`) the people load after the city, so they don't
+delay the start: until a person's model is in, a simple figure walks in their
+place.
+- **Instances:** each pedestrian or driver is a copy sharing the model's
+  geometry, with their own skeleton and animation mixer.
+- **Detail:** LOD0 or LOD1 by distance; far people's animations update about 12
+  times a second.
+- **Motion:** like the player, Idle, Walk and Run are blended by speed and timed
+  to it, with the `ArmsDown` shapes.
+- **Drivers** sit with Drive. A pedestrian hit by a car lies down (Lie), then
+  gets up and runs away.
+
+MB-Lab's code is GPL3 and its data (the base meshes and textures the bodies
+come from) is AGPL3, as for `characters/Human.glb`.

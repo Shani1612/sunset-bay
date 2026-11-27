@@ -1,0 +1,200 @@
+{
+ "body": {
+  "Z": [
+   -0.0023,
+   0.0962,
+   0.487,
+   0.9372,
+   1.2454,
+   1.3759,
+   1.5673,
+   1.732
+  ],
+  "shx": 0.144,
+  "hipx": 0.0995,
+  "chest": 0.1308,
+  "hipw": 0.1398,
+  "hip_y": -0.0127,
+  "torso_y": -0.0433,
+  "ank_y": 0.0294,
+  "ank_z": 0.0962,
+  "leg": 0.8451,
+  "foot": 0.1559,
+  "arm_a0": 56.9167,
+  "arm_len": 0.5167
+ },
+ "mapping": {
+  "XS": 0.7947,
+  "XH": 0.8538,
+  "XP": 0.8133,
+  "XC": 0.7926,
+  "TY": -0.0085,
+  "YO": -0.0056,
+  "leg": 0.9492,
+  "arm_from_vertical": 8.67,
+  "arm_down_extra": -1.76
+ },
+ "lie": {
+  "angles": {
+   "spine": -0.86,
+   "neck": -23.15,
+   "swing": -20.02,
+   "legs": -5.64,
+   "drop": 0.73
+  },
+  "lowest_mm": {
+   "head": 3.0,
+   "back": 3.0,
+   "seat": 3.0,
+   "feet": 3.0,
+   "arms": 3.2
+  },
+  "ground_mm": 3.0
+ },
+ "cycles": {
+  "Walk": {
+   "metres": 1.271946523125989,
+   "seconds": 0.9
+  },
+  "Run": {
+   "metres": 2.2781131757480395,
+   "seconds": 0.6
+  }
+ },
+ "press_mm": {
+  "ArmsDown": 45.8,
+  "ArmsDownRun": 36.1
+ },
+ "auto_mask": {
+  "poses": 120,
+  "skin_points": 0
+ },
+ "checks": {
+  "Rest": {},
+  "Idle": {},
+  "Walk": {},
+  "Run": {},
+  "Drive": {},
+  "Lie": {},
+  "Walk/Run blends": {}
+ },
+ "springs": {
+  "cloth_shirt_B": {
+   "p": [
+    -0.04,
+    0.35
+   ],
+   "r": [
+    -0.12,
+    0.12
+   ]
+  },
+  "cloth_sleeve_L": {
+   "p": [
+    -0.07,
+    0.1
+   ],
+   "r": [
+    -0.06,
+    0.06
+   ]
+  },
+  "cloth_sleeve_R": {
+   "p": [
+    -0.07,
+    0.1
+   ],
+   "r": [
+    -0.06,
+    0.06
+   ]
+  },
+  "cloth_jeans_L": {
+   "p": [
+    -0.08,
+    0.08
+   ],
+   "r": [
+    -0.05,
+    0.05
+   ]
+  },
+  "cloth_jeans_R": {
+   "p": [
+    -0.08,
+    0.08
+   ],
+   "r": [
+    -0.05,
+    0.05
+   ]
+  }
+ },
+ "checks_lod1 (1 cm)": {
+  "Rest": {},
+  "Idle": {},
+  "Walk": {},
+  "Run": {},
+  "Drive": {},
+  "Lie": {}
+ },
+ "triangles": {
+  "LOD0_Shirt": 4980,
+  "LOD0_Cloth": 12453,
+  "LOD0_Body": 12773,
+  "LOD0_Hair": 3072,
+  "LOD1_Cloth": 5714,
+  "LOD1_Body": 2699,
+  "LOD1_Hair": 344
+ },
+ "triangles_total": {
+  "LOD0": 33278,
+  "LOD1": 8757
+ },
+ "draw_calls": {
+  "LOD0": 5,
+  "LOD1": 3
+ },
+ "bytes_blender": 2219400,
+ "compacted": {
+  "TEXCOORD": 6,
+  "WEIGHTS": 8
+ },
+ "bytes": 1828256,
+ "npc": {
+  "id": "m_as01",
+  "sex": "male",
+  "height": 1.734,
+  "hip": 0.962,
+  "walk": {
+   "metres": 1.271946523125989,
+   "seconds": 0.9
+  },
+  "run": {
+   "metres": 2.2781131757480395,
+   "seconds": 0.6
+  },
+  "hair": [
+   0.025,
+   0.022,
+   0.02
+  ],
+  "lie": {
+   "angles": {
+    "spine": -0.86,
+    "neck": -23.15,
+    "swing": -20.02,
+    "legs": -5.64,
+    "drop": 0.73
+   },
+   "lowest_mm": {
+    "head": 3.0,
+    "back": 3.0,
+    "seat": 3.0,
+    "feet": 3.0,
+    "arms": 3.2
+   },
+   "ground_mm": 3.0
+  }
+ }
+}

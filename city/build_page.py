@@ -9,9 +9,12 @@ decoder from a CDN either, so publish models without Draco compression:
 
     npx @gltf-transform/cli copy city/assets/city.glb out/assets/city.glb
     base64 -w0 out/assets/city.glb > out/assets/city.glb.txt
-(the same for actors.glb and player.glb), plus city/assets/tex/*.jpg.
+(the same for actors.glb and player.glb, and for city/assets/npc/<id>.glb as
+assets/npc/<id>.glb.txt), plus city/assets/tex/*.jpg. The city's people load after the
+city, outside the loading bar, and their list (city/assets/npc/npcs.json) is put
+into the page.
 """
-import sys, re
+import sys, re, os, json
 src, out = sys.argv[1], sys.argv[2]
 s = open(src, encoding='utf-8').read()
 for pat in (r'<!doctype html>\s*', r'<html[^>]*>\s*', r'<head>\s*', r'<meta charset="utf-8">\s*', r'<meta name="viewport"[^>]*>\s*',
@@ -43,5 +46,23 @@ for m in ('city', 'actors', 'player'):
     a = "gltfL.load('assets/%s.glb'," % m
     assert s.count(a) == 1, a
     s = s.replace(a, "loadB64('assets/%s.glb'," % m)
+# the people: base64 too, but not through the loading manager (they come after the city is built)
+anchor = "const npcL=new THREE.GLTFLoader();"
+assert s.count(anchor) == 1
+s = s.replace(anchor, anchor + """
+function loadB64npc(url,onLoad,onProgress,onError){
+  const bad=onError||console.error;
+  fetch(url+'.txt').then(r=>{if(!r.ok)throw new Error('HTTP '+r.status+' '+url);return r.text();}).then(t=>{
+    const bin=atob(t.trim()),b=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)b[i]=bin.charCodeAt(i);
+    npcL.parse(b.buffer,'assets/npc/',onLoad,bad);
+  }).catch(bad);
+}""", 1)
+a = "npcL.load('assets/npc/'+id+'.glb',"
+assert s.count(a) == 1, a
+s = s.replace(a, "loadB64npc('assets/npc/'+id+'.glb',")
+a = "new THREE.FileLoader().load('assets/npc/npcs.json',t=>{try{loadNPCs(JSON.parse(t));}catch(e){console.warn('people',e);}},undefined,e=>console.warn('people',e));"
+assert s.count(a) == 1, a
+npcs = json.load(open(os.path.join(os.path.dirname(os.path.abspath(src)), 'assets', 'npc', 'npcs.json')))
+s = s.replace(a, "loadNPCs(%s);" % json.dumps(npcs, separators=(',', ':')))
 open(out, 'w', encoding='utf-8').write(s)
-print('base64 loader in')
+print('base64 loaders in;', len(npcs), 'people')

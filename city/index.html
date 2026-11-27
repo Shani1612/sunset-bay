@@ -99,6 +99,7 @@ body.touch #speed .bar{width:140px}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/DRACOLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/SkeletonUtils.js"></script>
 <script>
 (function(){
 'use strict';
@@ -292,12 +293,24 @@ gltfL.load('assets/actors.glb',g=>{ACTORS=g;},undefined,fail);
 // the player: the dressed, animated character (if it can't load, the game falls back to a simple figure)
 let PLAYERGLB=null;
 gltfL.load('assets/player.glb',g=>{PLAYERGLB=g;},undefined,e=>{console.warn('player model',e);});
+// the city's people (blender/export_player.py --npc): they load after the city, beside the game; until a
+// person's model is in, a simple figure walks in their place (and if none can load, the simple figures stay)
+const NPC_T=[];let NPC_IDS=[];
+const npcL=new THREE.GLTFLoader();
+function loadNPCs(info){
+  if(!THREE.SkeletonUtils){console.warn('people: SkeletonUtils missing');return;}
+  NPC_IDS=Object.keys(info).sort();
+  for(const id of NPC_IDS)npcL.load('assets/npc/'+id+'.glb',g=>{
+    try{const T=npcTemplate(id,info[id],g);NPC_T.push(T);npcArrived(T);}catch(e){console.warn('person '+id,e);}},undefined,e=>console.warn('person '+id,e));
+}
+function startNPCs(){new THREE.FileLoader().load('assets/npc/npcs.json',t=>{try{loadNPCs(JSON.parse(t));}catch(e){console.warn('people',e);}},undefined,e=>console.warn('people',e));}
 manager.onLoad=()=>{if(loadFailed||!CITY||!ACTORS)return;
   // the Hebrew lettering is drawn on canvases: wait (briefly) for the web font
   const font=document.fonts&&document.fonts.load?document.fonts.load('900 40px Heebo').catch(()=>{}):Promise.resolve();
   Promise.race([font,new Promise(r=>setTimeout(r,2500))]).then(()=>{
     try{buildWorld();}catch(e){fail(e);return;}
-    $('status').textContent='מוכן.';$('play').disabled=false;$('start').classList.add('ready');});};
+    $('status').textContent='מוכן.';$('play').disabled=false;$('start').classList.add('ready');
+    startNPCs();});};
 
 // a node's meshes as templates: geometry (optionally turned into game axes) and material per part
 const ROT_ACTOR=new THREE.Matrix4().makeRotationY(-Math.PI/2);   // Blender cars and people face +x; the game uses +z
@@ -897,7 +910,9 @@ function sstep(a,b,x){const t=Math.min(1,Math.max(0,(x-a)/(b-a)));return t*t*(3-
 function makeHero(G){
   const root=G.scene,g=new THREE.Group();g.add(root);scene.add(g);
   root.traverse(o=>{if(!o.isMesh)return;o.castShadow=true;o.receiveShadow=true;o.frustumCulled=false;
-    const m=o.material;if(m&&m.map)m.map.anisotropy=MAX_ANISO;});
+    const m=o.material;if(m&&m.map)m.map.anisotropy=MAX_ANISO;
+    // the eyelashes: dark strands whose alpha is the lash (cut, not blended: no sorting against the eyes)
+    if(m&&/^MBlab_eyelash/.test(m.name)){m.alphaTest=0.5;m.transparent=false;m.depthWrite=true;m.needsUpdate=true;}});
   const mixer=new THREE.AnimationMixer(root),A={},w={};
   for(const c of G.animations){const a=mixer.clipAction(c);a.play();a.setEffectiveWeight(c.name==='Idle'?1:0);A[c.name]=a;w[c.name]=c.name==='Idle'?1:0;}
   const cloth=CLOTH_SPRINGS.map(c=>({...c,b:root.getObjectByName(c.n),pp:0,pv:0,rr:0,rv:0})).filter(c=>c.b);
@@ -950,8 +965,10 @@ function animHero(h,dt,o){
   }
 }
 function seatPerson(p,car){ // sitting at the wheel: reclined at the hips, thighs forward, hands on the wheel
-  if(p.hero){p.g.rotation.set(0,0,0);p.g.position.set(car.seat.x,car.seat.y-p.hip+(car.kind==='sedan'?0.05:0),car.seat.z);car.bodyG.add(p.g);p.g.visible=true;
-    for(const n in p.A){p.w[n]=n==='Drive'?1:0;p.A[n].setEffectiveWeight(p.w[n]);}return;}
+  if(p.hero||p.npc){p.g.rotation.set(0,0,0);p.g.position.set(car.seat.x,car.seat.y-p.hip+(car.kind==='sedan'?0.05:0),car.seat.z);car.bodyG.add(p.g);p.g.visible=true;
+    for(const n in p.A){p.w[n]=n==='Drive'?1:0;p.A[n].setEffectiveWeight(p.w[n]);}
+    if(p.npc){npcLOD(p,Math.hypot(car.x-camera.position.x,car.z-camera.position.z));setPress(p);p.mixer.update(0);}   // (a pose held: no updates needed)
+    return;}
   const th=-0.3,h=p.hip;
   p.body.rotation.x=th;p.body.position.set(0,h-h*Math.cos(th),-h*Math.sin(th));
   p.legL.rotation.x=p.legR.rotation.x=-1.45-th;p.armL.rotation.x=p.armR.rotation.x=-0.95-th;
@@ -959,7 +976,107 @@ function seatPerson(p,car){ // sitting at the wheel: reclined at the hips, thigh
   p.g.position.set(car.seat.x,car.seat.y-p.hip,car.seat.z);
   car.bodyG.add(p.g);p.g.visible=true;
 }
-function unseat(p){if(p.g.parent)p.g.parent.remove(p.g);if(!p.hero){p.body.rotation.x=0;p.body.position.set(0,0,0);}scene.add(p.g);}
+function unseat(p){if(p.g.parent)p.g.parent.remove(p.g);if(!p.hero&&!p.npc){p.body.rotation.x=0;p.body.position.set(0,0,0);}scene.add(p.g);}
+
+// =====================================================================================================
+// the city's people: eight realistic characters (blender/make_npc_bodies.py, dress_character.py, make_hair.py,
+// export_player.py --npc), each a skinned model with Idle / Walk / Run / Drive / Lie and two levels of detail on
+// one skeleton: LOD0 near, LOD1 (about a fifth of the triangles) further away. A person is a copy of a model
+// sharing its geometry, with their own skeleton and animation mixer; their garments' colours come from their
+// own 8x1 palette texture (u: 0 shirt, 1 jeans, 2 shoes; the rest white, the colours per vertex)
+// =====================================================================================================
+const NPC_LOD0=MOBILE?12:22;                        // metres: nearer people get the detailed model
+const SHOES=['#ecebe6','#ecebe6','#1d1d20','#8d9097','#cfc6b6','#2b3550','#7a2e2a'];
+const PRESS_KEYS=[['ArmsDown',['Idle','Walk']],['ArmsDownRun',['Run']]];
+function npcTemplate(id,info,G){
+  const T={id,info,G,clips:{},female:info.sex==='female',vWalk:info.walk.metres/info.walk.seconds,vRun:info.run.metres/info.walk.seconds};
+  T.vRun=info.run.metres/info.run.seconds;
+  for(const c of G.animations)T.clips[c.name]=c;
+  for(const n of ['Idle','Walk','Run','Drive','Lie'])if(!T.clips[n])throw new Error('missing animation '+n);
+  const hair=new THREE.Color(info.hair[0],info.hair[1],info.hair[2]),seen=new Set();
+  G.scene.traverse(o=>{
+    if(!o.isMesh)return;
+    // one bounding sphere for every pose, lying down too (the skinned mesh is drawn where its bones put it)
+    if(!seen.has(o.geometry)){seen.add(o.geometry);o.geometry.boundingSphere=new THREE.Sphere(new THREE.Vector3(0,0.9,0),1.45);}
+    const m=o.material,n=m.name||'';
+    if(n.startsWith('NPC_Hair'))   // strands: the texture's alpha times each shell's vertex alpha, cut at a half (no alpha to
+      // coverage: it would turn the strands' alpha into see-through hair)
+      o.material=new THREE.MeshStandardMaterial({name:n,map:m.map,color:hair,vertexColors:true,alphaTest:0.5,side:THREE.DoubleSide,roughness:0.5,skinning:true});
+    else if(n.startsWith('NPC_Eyelash'))
+      o.material=new THREE.MeshStandardMaterial({name:n,map:m.map,alphaTest:0.5,side:THREE.DoubleSide,roughness:0.6,skinning:true});
+    else if(n.startsWith('NPC_Skin')){m.roughness=0.55;m.metalness=0;if(m.map)m.map.anisotropy=4;}
+    else if(n.startsWith('NPC_Cloth'))o.userData.cloth=true;
+    if(o.material.map&&o.material.map!==m.map)o.material.map.anisotropy=4;
+  });
+  return T;
+}
+function paletteTex(shirt,pants,shoes){
+  const d=new Uint8Array(32).fill(255);
+  [shirt,pants,shoes].forEach((h,i)=>{const c=new THREE.Color(h);d[i*4]=Math.round(c.r*255);d[i*4+1]=Math.round(c.g*255);d[i*4+2]=Math.round(c.b*255);});
+  const t=new THREE.DataTexture(d,8,1,THREE.RGBAFormat);
+  t.encoding=THREE.sRGBEncoding;t.magFilter=t.minFilter=THREE.NearestFilter;t.generateMipmaps=false;t.needsUpdate=true;
+  return t;
+}
+function makeNPC(o){
+  o=o||{};
+  const T=o.T||pick(NPC_T),root=THREE.SkeletonUtils.clone(T.G.scene);
+  const shirt=o.shirt||pick(TOPS),pants=o.pants||pick(PANTS),shoes=o.shoes||pick(SHOES),pal=paletteTex(shirt,pants,shoes);
+  const cloth={},lod=[[],[]];
+  root.traverse(m=>{
+    if(!m.isMesh)return;
+    let a=m;while(a&&!/^LOD[01]_/.test(a.name))a=a.parent;
+    if(m.userData.cloth){const mt=!!m.morphTargetInfluences;
+      m.material=cloth[mt]||(cloth[mt]=new THREE.MeshStandardMaterial({map:pal,vertexColors:true,roughness:0.85,side:THREE.DoubleSide,skinning:true,morphTargets:mt}));}
+    m.castShadow=m.receiveShadow=true;
+    lod[a&&a.name[3]==='1'?1:0].push(m);
+  });
+  const g=new THREE.Group();g.add(root);scene.add(g);
+  const mixer=new THREE.AnimationMixer(root),A={},w={};
+  for(const n in T.clips){const a=mixer.clipAction(T.clips[n]);a.play();a.setEffectiveWeight(n==='Idle'?1:0);A[n]=a;w[n]=n==='Idle'?1:0;}
+  A.Idle.time=Math.random()*A.Idle.getClip().duration;A.Walk.time=Math.random()*A.Walk.getClip().duration;
+  const press=[];
+  root.traverse(m=>{const d=m.morphTargetDictionary;if(!d)return;for(const [k,a] of PRESS_KEYS)if(d[k]!==undefined)press.push([m,d[k],a]);});
+  const p={npc:true,T,g,root,mixer,A,w,lod,press,pal,L:-1,acc:0,hip:T.info.hip,female:T.female,colors:{shirt,pants,shoes,female:T.female}};
+  npcLOD(p,0);mixer.update(0);
+  return p;
+}
+function npcLOD(p,d){const L=d<NPC_LOD0?0:1;if(L===p.L)return;p.L=L;for(const m of p.lod[0])m.visible=!L;for(const m of p.lod[1])m.visible=!!L;}
+function setPress(p){for(const [m,i,a] of p.press){let v=0;for(const n of a)v+=p.w[n]||0;m.morphTargetInfluences[i]=Math.min(1,v);}}
+// standing, walking, running (as the player's: blended by speed, the cycles in step and timed to it), knocked down
+function animNPC(p,dt,o){
+  p.acc+=dt;
+  if(o.far&&p.acc<1/12)return;                 // (far away: about 12 updates a second)
+  dt=p.acc;p.acc=0;
+  const tgt={Idle:0,Walk:0,Run:0,Drive:0,Lie:0};
+  if(o.knocked)tgt.Lie=1;
+  else{const r=sstep(2.6,3.6,o.speed),wk=sstep(0.12,0.7,o.speed)*(1-r);tgt.Run=r;tgt.Walk=wk;tgt.Idle=Math.max(0,1-r-wk);}
+  const k=Math.min(1,dt*(o.knocked?14:9));
+  for(const n in p.A){p.w[n]+=((tgt[n]||0)-p.w[n])*k;p.A[n].setEffectiveWeight(p.w[n]);}
+  const W=p.A.Walk,R=p.A.Run;
+  W.timeScale=clamp(o.speed/p.T.vWalk,0.55,1.6);R.timeScale=clamp(o.speed/p.T.vRun,0.7,1.5);
+  if(p.w.Walk>0.01&&p.w.Run>0.01){const [a,b]=p.w.Run>p.w.Walk?[R,W]:[W,R];b.time=a.time/a.getClip().duration*b.getClip().duration;}
+  p.mixer.update(dt);
+  setPress(p);
+}
+// a person's model arrived: the simple figures meant to be this person become them (same colours)
+function makePed(o){return NPC_T.length?makeNPC(o):makePerson(o);}
+function swapIn(h,T){
+  const old=h.p;if(old.npc)return;
+  const np=makeNPC({T,shirt:old.colors.shirt,pants:old.colors.pants});
+  np.g.position.copy(old.g.position);np.g.rotation.copy(old.g.rotation);
+  const car=h.car||null;
+  if(car){unseat(old);if(old.g.parent)old.g.parent.remove(old.g);h.p=np;seatPerson(np,car);}
+  else{np.g.visible=old.g.visible;if(old.g.parent)old.g.parent.remove(old.g);h.p=np;}
+  h.shadow=undefined;
+}
+function npcArrived(T){
+  if(!NPC_IDS.length)return;
+  for(const h of peds.concat(DRIVERS)){
+    if(h.p.npc)continue;
+    if(!h.want)h.want=pick(NPC_IDS);
+    if(h.want===T.id)swapIn(h,T);
+  }
+}
 
 const ALLCARS=[];
 const paintC={};
@@ -1091,11 +1208,12 @@ function updateAI(c,dt){
 // drivers: a few seated people go to the traffic cars nearest the camera
 const DRIVERS=[];
 function updateDrivers(){
-  if(!DRIVERS.length)for(let k=0;k<(MOBILE?4:8);k++){const p=makePerson();p.g.visible=false;DRIVERS.push({p,car:null});}
+  if(!DRIVERS.length)for(let k=0;k<(MOBILE?4:8);k++){const p=makePed();p.g.visible=false;DRIVERS.push({p,car:null});}
   const near=ALLCARS.filter(c=>c.mode==='ai'&&!c.hidden).map(c=>({c,d:Math.hypot(c.x-camera.position.x,c.z-camera.position.z)}))
     .filter(e=>e.d<60).sort((a,b)=>a.d-b.d).slice(0,DRIVERS.length).map(e=>e.c);
   for(const d of DRIVERS)if(d.car&&(!near.includes(d.car)||d.car.mode!=='ai')){d.car.driver=null;d.car=null;unseat(d.p);d.p.g.visible=false;}
   for(const c of near)if(!c.driver){const d=DRIVERS.find(d=>!d.car);if(!d)break;d.car=c;c.driver=d;seatPerson(d.p,c);}
+  for(const d of DRIVERS)if(d.car&&d.p.npc)npcLOD(d.p,Math.hypot(d.car.x-camera.position.x,d.car.z-camera.position.z));
 }
 function freeCar(c,vx,vz){ // a traffic car knocked out of its lane: it rolls to a stop and stays parked
   if(c.driver){const d=c.driver;d.car=null;unseat(d.p);d.p.g.visible=false;c.driver=null;
@@ -1164,7 +1282,7 @@ function loopCorners(r){const w=r.x1-r.x0,h=r.z1-r.z0;return [0,w,w+h,2*w+h];}  
 const CORNER_SIGN=[[-1,-1],[1,-1],[1,1],[-1,1]];
 function spawnPed(x,z){
   if(peds.length>=PED_N+8)return null;
-  const q={p:makePerson(),x,z,a:0,mode:'path',path:[],spd:rand(1.15,1.6),off:rand(-0.7,0.7),dir:Math.random()<0.5?1:-1,t:0,block:null,timer:0,ped:true};
+  const q={p:makePed(),x,z,a:0,mode:'path',path:[],spd:rand(1.15,1.6),off:rand(-0.7,0.7),dir:Math.random()<0.5?1:-1,t:0,block:null,timer:0,ped:true};
   q.p.g.position.set(x,0.15,z);peds.push(q);WALKERS.push(q);joinNearestLoop(q);return q;
 }
 function joinNearestLoop(q){
@@ -1249,6 +1367,9 @@ function placePed(q,dt){
   const dc=Math.hypot(q.x-camera.position.x,q.z-camera.position.z),vis=dc<130;q.p.g.visible=vis&&q.mode!=='ride';
   castShadows(q,q.p.g,dc<45);
   if(!vis)return;
+  if(q.p.npc){                                    // (lying down is an animation of theirs, on the ground)
+    npcLOD(q.p,dc);q.p.g.position.set(q.x,groundY(q.x,q.z),q.z);q.p.g.rotation.set(0,q.a,0);
+    animNPC(q.p,dt,{speed:q.mode==='knocked'?0:(q.speed||0),knocked:q.mode==='knocked',far:dc>40});return;}
   if(q.mode==='knocked'){q.p.g.position.set(q.x,groundY(q.x,q.z)+0.14,q.z);q.p.g.rotation.set(-1.5,q.a,0,'YXZ');q.p.legL.rotation.x=q.p.legR.rotation.x=0.1;q.p.armL.rotation.x=-0.4;q.p.armR.rotation.x=0.3;return;}
   q.p.g.position.set(q.x,groundY(q.x,q.z),q.z);q.p.g.rotation.set(0,q.a,0);animPerson(q.p,q.speed||0,dt);
 }
@@ -1625,7 +1746,7 @@ function startGame(){
 $('play').addEventListener('click',startGame);
 requestAnimationFrame(frame);
 // for automated checks
-window.__city={get state(){return state;},start:startGame,player,cars:ALLCARS,peds,keys,camera,renderer,scene,NODES,SIGNALS,CHUNKS,
+window.__city={get state(){return state;},start:startGame,player,cars:ALLCARS,peds,keys,camera,renderer,scene,NODES,SIGNALS,CHUNKS,NPC_T,DRIVERS,knock,npcLOD,get npcIds(){return NPC_IDS;},
   get job(){return job;},get money(){return money;},cancelJob(){if(job)endJob(false,'');jobCool=0;},light,enterCar,exitCar,nearestCar,
   setYaw(v){camYaw=v;lookT=2;},setPitch(v){camPitch=v;},
   step(n,dt){dt=dt||1/60;for(let i=0;i<n;i++)update(dt);renderer.render(scene,camera);}};

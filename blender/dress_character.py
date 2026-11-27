@@ -19,13 +19,17 @@ Run with Blender 4.2+ (or the bpy module):
     blender -b -P blender/dress_character.py -- characters/Human.glb characters
     blender -b -P blender/dress_character.py -- <npc>.glb <outdir> [style.json]
 
-Any MB-Lab character can be dressed (a woman or a man, of any build): the
-pipeline's measures were made on characters/Human.glb, so a character of other
-proportions is first mapped onto Human.glb's (heights, widths and depth
-centres matched at the skeleton's landmarks, by a smooth map), dressed there,
-and the clothes are mapped back onto the real body and checked there. For
-Human.glb itself the map is the identity. style.json may give the iris colour
-("iris": [r, g, b], linear).
+Any MB-Lab character can be dressed (a woman or a man, of any build): with
+"fit" in style.json (a dressed reference, characters/human_dressed.blend), the
+reference's finished clothes are carried onto this body instead of being built
+again (fit_clothes): every point of the clothes moves as the skin under it
+does, the skin matched between the two bodies by their shared UV layout (MB-Lab's
+women and men have one), smoothed and fitted by moving least squares; then the
+clothes are set off this body again (the collar, the sleeve ends and the
+waistband at the reference's gaps, the shirt hanging from the chest), unfolded,
+re-weighted where the body's shape asks it, and checked as above. The few
+heights this needs are carried over by the skeleton's landmarks. style.json
+may also give the iris colour ("iris": [r, g, b], linear).
 """
 import bpy, bmesh, math, os, sys, json
 from collections import defaultdict
