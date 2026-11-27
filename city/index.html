@@ -1135,7 +1135,8 @@ function makeCar(kind,hex){
   const c={g,bodyG,near,far,wheels,lamp,hex,kind,len:T.len,hw:X.half_width,wb:X.wheels_front-X.wheels_rear,R:X.wheel_r,vmax:X.vmax,
     x:0,z:0,y:0,a:0,v:0,vx:0,vz:0,steer:0,mode:'parked',braking:false,roll:0,pitch:0,rollV:0,pitchV:0,prevA:0,prevV:0,
     driver:null,cruise:rand(10.5,13.5),ghost:0,stuck:0,bump:0,ind:0,indHold:0,lod:0,
-    door:{g:doorG,a:0,open:X.door_open,hold:0},
+    door:{g:doorG,a:0,open:X.door_open,hold:0},gear:1,yr:0,
+    susp:{h:0,hv:0,p:0,pv:0,r:0,rv:0,w:[{x:X.track,z:X.wheels_front},{x:-X.track,z:X.wheels_front},{x:X.track,z:X.wheels_rear},{x:-X.track,z:X.wheels_rear}].map(W=>Object.assign(W,{g:0,off:0}))},
     seat:{x:X.seat[0],y:X.seat[1],z:X.seat[2]}};
   setLamps(c,{drl:0,tail:0,brake:0,indL:0,indR:0,reverse:0});
   ALLCARS.push(c);return c;
@@ -1152,15 +1153,36 @@ function plateTex(){
   const t=new THREE.CanvasTexture(cv);t.encoding=THREE.sRGBEncoding;t.anisotropy=4;return t;
 }
 function carCircles(c){const f={x:Math.sin(c.a),z:Math.cos(c.a)},o=c.len/2-c.hw;return [{x:c.x+f.x*o,z:c.z+f.z*o},{x:c.x,z:c.z},{x:c.x-f.x*o,z:c.z-f.z*o}];}
+// the suspension: each wheel on the ground under it (a curb lifts it 15 cm), the body on springs above the four
+// (heave, pitch, roll), leaning under braking, accelerating and cornering; each wheel's travel from the body is held
+// within the model's bump and droop (the bump is what its wheel arches are checked for, at full lock)
+function suspension(c,dt){
+  const S=c.susp,X=CARS[c.kind].x,sa=Math.sin(c.a),ca=Math.cos(c.a);
+  for(const W of S.w){W.g=groundY(c.x+sa*W.z+ca*W.x,c.z+ca*W.z-sa*W.x);}
+  const base=(S.w[0].g+S.w[1].g+S.w[2].g+S.w[3].g)/4;
+  c.y+=(base-c.y)*Math.min(1,dt*25);
+  const zf=X.wheels_front,zr=X.wheels_rear,t=X.track;
+  const gf=(S.w[0].g+S.w[1].g)/2-c.y,gr=(S.w[2].g+S.w[3].g)/2-c.y,gl=(S.w[0].g+S.w[2].g)/2-c.y,gR=(S.w[1].g+S.w[3].g)/2-c.y;
+  // the ground's plane under the wheels, and the lean from the accelerations (forward ax, left ay)
+  const yaw=wrapA(c.a-c.prevA)/Math.max(dt,1e-4),acc=(c.v-c.prevV)/Math.max(dt,1e-4);c.prevA=c.a;c.prevV=c.v;
+  const ax=clamp(c.mode==='ai'?acc:(c.axs||0),-12,12),ay=clamp(c.mode==='ai'?yaw*c.v:(c.ays||0),-12,12);
+  const tH=(gf+gr)/2,tP=-(gf-gr)/(zf-zr)-ax*0.0032,tR=(gl-gR)/(2*t)+ay*0.0042;
+  const sh=Math.min(dt,1/30),w0=10,z0=0.55;
+  S.hv+=((tH-S.h)*w0*w0-2*z0*w0*S.hv)*sh;S.h+=S.hv*sh;
+  S.pv+=((tP-S.p)*w0*w0-2*z0*w0*S.pv)*sh;S.p+=S.pv*sh;
+  S.rv+=((tR-S.r)*w0*w0-2*z0*w0*S.rv)*sh;S.r+=S.rv*sh;
+  // a wheel at its bump stop lifts the body there
+  let lift=0;
+  for(const W of S.w){const d=S.h-W.z*S.p+W.x*S.r,rel=(W.g-c.y)-d;if(rel>X.bump)lift=Math.max(lift,rel-X.bump);}
+  if(lift>0){S.h+=lift;S.hv=Math.max(S.hv,0);}
+  for(const W of S.w){const d=S.h-W.z*S.p+W.x*S.r;W.off=clamp(W.g-c.y,d-X.droop,d+X.bump);}
+  c.bodyG.position.y=S.h;c.bodyG.rotation.set(S.p,0,S.r);
+}
 function carVisuals(c,dt){
-  const gy=groundY(c.x,c.z);c.y+=(gy-c.y)*Math.min(1,dt*12);
+  suspension(c,dt);
   c.g.position.set(c.x,c.y,c.z);c.g.rotation.y=c.a;
-  // suspension: lean into corners, dive under braking, squat when accelerating
-  const sh=Math.min(dt,1/30),yaw=wrapA(c.a-c.prevA)/Math.max(dt,1e-4),acc=(c.v-c.prevV)/Math.max(dt,1e-4);c.prevA=c.a;c.prevV=c.v;
-  const tR=clamp(-yaw*c.v*0.004,-0.015,0.015),tP=clamp(acc*0.003,-0.009,0.009);   // (the limits the models' wheel arches are checked for)
-  c.rollV+=((tR-c.roll)*90-c.rollV*12)*sh;c.roll+=c.rollV*sh;c.pitchV+=((tP-c.pitch)*80-c.pitchV*11)*sh;c.pitch+=c.pitchV*sh;
-  c.bodyG.rotation.set(c.pitch,0,c.roll);
-  for(const w of c.wheels){w.spin.rotation.x+=c.v*dt/c.R;if(w.front)w.piv.rotation.y=c.steer;}
+  for(let i=0;i<4;i++){const w=c.wheels[i];w.piv.position.y=c.R+c.susp.w[i].off;
+    if(!(c.hand&&!w.front))w.spin.rotation.x+=c.v*dt/c.R;if(w.front)w.piv.rotation.y=c.steer;}
   // near or far model (the far one has its wheels in it)
   const dc=Math.hypot(c.x-camera.position.x,c.z-camera.position.z),L=dc>CAR_LOD+(c.lod?-2:2)?1:0;
   if(L!==c.lod){c.lod=L;c.near.visible=!L;c.far.visible=!!L;for(const w of c.wheels)w.piv.visible=!L;}
@@ -1268,55 +1290,203 @@ function updateDrivers(){
 function freeCar(c,vx,vz){ // a traffic car knocked out of its lane: it rolls to a stop and stays parked
   if(c.driver){const d=c.driver;d.car=null;unseat(d.p);d.p.g.visible=false;c.driver=null;c.door.hold=0.6;   // (out of the driver's door)
     const l={x:Math.cos(c.a),z:-Math.sin(c.a)};const q=spawnPed(c.x+l.x*(c.hw+0.8),c.z+l.z*(c.hw+0.8));if(q)flee(q,c.x,c.z,6);}
-  c.mode='free';c.ai=null;c.vx=vx;c.vz=vz;c.ind=0;
+  c.mode='free';c.ai=null;c.vx=vx;c.vz=vz;c.ind=0;c.park=false;c.gear=0;c.yr=c.yr||0;
 }
 
 // =====================================================================================================
 // driving physics (the player's car, and any car that was pushed)
 // =====================================================================================================
-function carPhysics(c,inp,dt){
-  const fx=Math.sin(c.a),fz=Math.cos(c.a),lx=Math.cos(c.a),lz=-Math.sin(c.a);
-  let vf=c.vx*fx+c.vz*fz,vl=c.vx*lx+c.vz*lz;
-  const vmax=c.vmax;
-  if(inp.up){vf+=(vf<-0.3?16:7.6*(1-Math.max(0,vf)/vmax))*dt;}
-  else if(inp.down){vf+=vf>0.3?-15*dt:-4.5*dt*(vf>-9?1:0);}
-  else vf-=Math.sign(vf)*Math.min(Math.abs(vf),(0.5+Math.abs(vf)*0.06)*dt);
-  if(inp.hand)vf-=Math.sign(vf)*Math.min(Math.abs(vf),9*dt);
-  vl*=Math.exp(-(inp.hand?1.4:9)*dt);
-  const maxSteer=0.58/(1+Math.abs(vf)*0.055);
-  c.steer+=(inp.steer*maxSteer-c.steer)*Math.min(1,dt*8);
-  c.a+=vf*Math.tan(c.steer)/c.wb*dt;
-  const nfx=Math.sin(c.a),nfz=Math.cos(c.a),nlx=Math.cos(c.a),nlz=-Math.sin(c.a);
-  c.vx=nfx*vf+nlx*vl;c.vz=nfz*vf+nlz*vl;
-  c.x+=c.vx*dt;c.z+=c.vz*dt;c.v=vf;
-  c.braking=(inp.down&&vf>0.3)||inp.hand;
-  // walls and posts: three circles along the car
-  let impact=0;
-  for(let it=0;it<2;it++)for(const o of carCircles(c)){
-    const ox=o.x,oz=o.z,h=collideCircle(o,c.hw);
-    if(!h)continue;c.x+=o.x-ox;c.z+=o.z-oz;
-    const vn=c.vx*h.x+c.vz*h.z;if(vn<0){c.vx-=1.35*vn*h.x;c.vz-=1.35*vn*h.z;impact=Math.max(impact,-vn);}
+// A car is a rigid body on four tyres. Each model's mass, centre of gravity, power, torque, gears and suspension
+// travel come from blender/make_cars.py (the body's extras). Steps of 1/120 s: the tyres' forces (slip angles, the
+// load on each wheel shifting under braking, accelerating and cornering, a friction circle), the engine through an
+// automatic gearbox, brakes (65/35), the handbrake locking the rear wheels, drag; then collisions as boxes.
+const PH=1/120,GRAV=9.81,MU=1.0;
+const CDA={hatch:0.66,sedan:0.62,suv:0.82};
+function carSpec(c){
+  const T=CARS[c.kind];if(T.ph)return T.ph;const X=T.x;
+  const L=X.wheels_front-X.wheels_rear,front=X.drive==='awd'?0.55:0.60;          // weight on the front axle (engine in front)
+  const zc=X.wheels_front-L*(1-front);                                           // the centre of gravity, along the car
+  const m=X.mass;
+  return T.ph={m,I:m*(X.length*X.length+4*X.half_width*X.half_width)/12*1.05,L,zc,a:X.wheels_front-zc,b:zc-X.wheels_rear,
+    h:X.cog_h,T:2*X.track,R:X.wheel_r,Pw:X.power_kw*1000,Tq:X.torque_nm,gears:X.gears,fd:X.final_drive,drive:X.drive,
+    vmax:X.vmax,CdA:CDA[c.kind]||0.7,brake:1.15*m*GRAV,
+    W:[{x:X.track,z:X.wheels_front-zc,front:true},{x:-X.track,z:X.wheels_front-zc,front:true},
+       {x:X.track,z:X.wheels_rear-zc,front:false},{x:-X.track,z:X.wheels_rear-zc,front:false}]};
+}
+// the engine's torque (share of its peak) by revolutions per minute
+function torqueCurve(rpm){return rpm<1000?0.6:rpm<2500?0.6+0.4*(rpm-1000)/1500:rpm<4800?1:rpm<6500?1-0.3*(rpm-4800)/1700:0.55;}
+const REVERSE=3.3,IDLE=850,REDLINE=6400;
+function physStep(c,inp,h){
+  const P=carSpec(c),sa=Math.sin(c.a),ca=Math.cos(c.a);                  // forward (sa,ca), left (ca,-sa)
+  let cx=c.x+sa*P.zc,cz=c.z+ca*P.zc;                                      // the centre of gravity
+  const u=c.vx*sa+c.vz*ca,w=c.vx*ca-c.vz*sa;let r=c.yr||0;
+  // the driver: throttle, brake (S brakes, and once nearly stopped selects reverse), handbrake
+  let thr=0,brk=0;
+  if(c.gear===-1){if(inp.down)thr=1;if(inp.up){if(u<-0.5)brk=1;else c.gear=1;}}
+  else{if(inp.up)thr=1;if(inp.down){if(u>0.5)brk=1;else{c.gear=-1;thr=1;}}}
+  if(c.gear===0)thr=0;
+  const hand=!!inp.hand;
+  // engine and gearbox
+  const ratio=c.gear===-1?REVERSE:c.gear>0?P.gears[c.gear-1]:0;
+  let rpm=Math.abs(u)/P.R*ratio*P.fd*9.549;
+  c.shiftT=(c.shiftT||0)-h;
+  if(c.gear>0&&c.shiftT<=0){if(rpm>5900&&c.gear<P.gears.length){c.gear++;c.shiftT=0.5;}else if(rpm<2100&&c.gear>1){c.gear--;c.shiftT=0.5;}}
+  rpm=Math.max(rpm,IDLE+(thr&&Math.abs(u)<3?1900:0));                     // (the clutch slips as it pulls away)
+  c.rpm=Math.min(rpm,REDLINE);
+  let Tq=P.Tq*torqueCurve(c.rpm);Tq=Math.min(Tq,P.Pw/(c.rpm*0.10472));
+  // (through the gearbox and the spinning parts: about 0.72 of the engine's force reaches the car's motion)
+  let Fdrive=c.shiftT>0.25?0:thr*Tq*ratio*P.fd*0.72/P.R*(c.gear===-1?-1:1);
+  if(u>P.vmax&&Fdrive>0)Fdrive=0;if(u<-9&&Fdrive<0)Fdrive=0;             // (a limiter; reverse to 32 km/h)
+  // loads on the wheels: static, shifted by the last step's accelerations
+  const ax=c.axs||0,ay=c.ays||0,mg=P.m*GRAV;
+  const Ff=mg*P.b/P.L-P.m*ax*P.h/P.L,Fr=mg*P.a/P.L+P.m*ax*P.h/P.L,dLat=P.m*ay*P.h/P.T;
+  const Fz=[Ff/2-dLat*P.b/P.L,Ff/2+dLat*P.b/P.L,Fr/2-dLat*P.a/P.L,Fr/2+dLat*P.a/P.L].map(v=>Math.max(0,v));
+  let sU=0,sW=0,tq=0,slide=0;
+  const driven=P.drive==='awd'?[0.2,0.2,0.3,0.3]:[0.5,0.5,0,0];
+  for(let i=0;i<4;i++){
+    const Wh=P.W[i],d=Wh.front?c.steer:0,cd=Math.cos(d),sd=Math.sin(d);
+    const ui=u-r*Wh.x,wi=w+r*Wh.z,uw=ui*cd+wi*sd,ww=-ui*sd+wi*cd;
+    const lim=MU*Fz[i];
+    let Fx=Fdrive*driven[i];
+    if(brk&&Math.abs(uw)>0.05)Fx-=Math.sign(uw)*P.brake*(Wh.front?0.65:0.35)/2;
+    Fx-=Math.sign(uw)*0.012*Fz[i]*Math.min(1,Math.abs(uw));                // rolling resistance
+    // a locked wheel (the handbrake's rear ones; all four on a parked car) slides: friction against its motion
+    const locked=(hand&&!Wh.front)||c.park;
+    let slip=false,Fy;
+    if(locked){const sp=Math.hypot(uw,ww),k=0.75*Fz[i]/Math.max(sp,0.4);Fx=-uw*k;Fy=-ww*k;slip=sp>0.5;}
+    else{const al=Math.atan2(ww,Math.max(Math.abs(uw),3));                // slip angle (held at low speed)
+      Fy=-lim*Math.sin(1.6*Math.atan(9*al));
+      const mag=Math.hypot(Fx,Fy);if(mag>lim&&mag>0){Fx*=lim/mag;Fy*=lim/mag;slip=true;}
+      if(Math.abs(al)>0.16&&Math.abs(uw)>4)slip=true;}
+    c.slips[i]=slip&&Math.hypot(uw,ww)>3?1:0;slide+=c.slips[i];
+    const Fu=Fx*cd-Fy*sd,Fw=Fx*sd+Fy*cd;
+    sU+=Fu;sW+=Fw;tq+=Wh.z*Fw-Wh.x*Fu;
   }
-  // other cars
+  sU-=0.6*P.CdA*u*Math.abs(u);                                            // air
+  // integrate (velocities in the world)
+  c.vx+=(sa*sU+ca*sW)/P.m*h;c.vz+=(ca*sU-sa*sW)/P.m*h;r+=tq/P.I*h;
+  const k=Math.min(1,h*12);c.axs=(c.axs||0)+(sU/P.m-(c.axs||0))*k;c.ays=(c.ays||0)+(sW/P.m-(c.ays||0))*k;
+  // standing still: no creeping
+  if(!thr&&Math.hypot(c.vx,c.vz)<0.06&&Math.abs(r)<0.03){c.vx=c.vz=0;r=0;}
+  c.yr=r;
+  cx+=c.vx*h;cz+=c.vz*h;c.a+=r*h;
+  c.x=cx-Math.sin(c.a)*P.zc;c.z=cz-Math.cos(c.a)*P.zc;
+  c.v=c.vx*Math.sin(c.a)+c.vz*Math.cos(c.a);
+  c.braking=(brk>0&&Math.abs(c.v)>0.3)||hand;c.thr=thr;c.hand=hand;c.slide=slide;
+}
+
+// ---- collisions: each car a box (its length by its width), the buildings boxes, the posts circles
+function carBox(c){const sa=Math.sin(c.a),ca=Math.cos(c.a);return {x:c.x,z:c.z,f:{x:sa,z:ca},l:{x:ca,z:-sa},hl:c.len/2,hw:c.hw};}
+function rectBox(s){return {x:(s.x0+s.x1)/2,z:(s.z0+s.z1)/2,f:{x:0,z:1},l:{x:1,z:0},hl:(s.z1-s.z0)/2,hw:(s.x1-s.x0)/2};}
+function boxCorners(o){const P=[];for(const a of [1,-1])for(const b of [1,-1])P.push({x:o.x+o.f.x*o.hl*a+o.l.x*o.hw*b,z:o.z+o.f.z*o.hl*a+o.l.z*o.hw*b});return P;}
+function boxHas(o,p,m){const dx=p.x-o.x,dz=p.z-o.z;return Math.abs(dx*o.f.x+dz*o.f.z)<=o.hl+(m||0)&&Math.abs(dx*o.l.x+dz*o.l.z)<=o.hw+(m||0);}
+// separating axes: the overlap's normal (pointing from B to A), its depth and a contact point; null if apart
+function boxHit(A,B){
+  let best=null;
+  for(const ax of [A.f,A.l,B.f,B.l]){
+    const pr=o=>{const c=o.x*ax.x+o.z*ax.z,e=Math.abs(o.hl*(o.f.x*ax.x+o.f.z*ax.z))+Math.abs(o.hw*(o.l.x*ax.x+o.l.z*ax.z));return [c-e,c+e];};
+    const [a0,a1]=pr(A),[b0,b1]=pr(B),o1=a1-b0,o2=b1-a0;if(o1<=0||o2<=0)return null;
+    const d=Math.min(o1,o2);if(!best||d<best.d)best={d,n:o2<o1?{x:ax.x,z:ax.z}:{x:-ax.x,z:-ax.z}};
+  }
+  // the contact: corners of one inside the other (the deepest ones, averaged)
+  let pts=boxCorners(A).filter(p=>boxHas(B,p,0.01)).concat(boxCorners(B).filter(p=>boxHas(A,p,0.01)));
+  if(!pts.length)pts=[{x:(A.x+B.x)/2,z:(A.z+B.z)/2}];
+  best.p={x:pts.reduce((s,p)=>s+p.x,0)/pts.length,z:pts.reduce((s,p)=>s+p.z,0)/pts.length};
+  return best;
+}
+function circleHit(A,q){   // a box and a post (x, z, r): normal from the post to the box
+  const dx=q.x-A.x,dz=q.z-A.z,lf=clamp(dx*A.f.x+dz*A.f.z,-A.hl,A.hl),ll=clamp(dx*A.l.x+dz*A.l.z,-A.hw,A.hw);
+  const px=A.x+A.f.x*lf+A.l.x*ll,pz=A.z+A.f.z*lf+A.l.z*ll,ex=px-q.x,ez=pz-q.z,d=Math.hypot(ex,ez);
+  if(d>=q.r)return null;
+  if(d<1e-6){const n={x:A.x-q.x,z:A.z-q.z},nl=Math.hypot(n.x,n.z)||1;return {d:q.r,n:{x:n.x/nl,z:n.z/nl},p:{x:px,z:pz}};}
+  return {d:q.r-d,n:{x:ex/d,z:ez/d},p:{x:px,z:pz}};
+}
+// a push j along n at point p, on a car (its centre of gravity, its turning)
+function cogOf(c){const P=carSpec(c);return {x:c.x+Math.sin(c.a)*P.zc,z:c.z+Math.cos(c.a)*P.zc};}
+function pointVel(c,p){if(c.mode==='ai')return {x:Math.sin(c.a)*c.v,z:Math.cos(c.a)*c.v};const g=cogOf(c),rx=p.x-g.x,rz=p.z-g.z,r=c.yr||0;return {x:c.vx+r*rz,z:c.vz-r*rx};}
+function resolve(A,B,hit){   // B: a car, or null for the city's solids
+  const n=hit.n,p=hit.p,PA=carSpec(A),gA=cogOf(A),rA={x:p.x-gA.x,z:p.z-gA.z};
+  const dynB=B&&B.mode!=='ai';
+  const PB=B&&carSpec(B),gB=B&&cogOf(B),rB=B?{x:p.x-gB.x,z:p.z-gB.z}:null;
+  const vA=pointVel(A,p),vB=B?pointVel(B,p):{x:0,z:0},rel={x:vA.x-vB.x,z:vA.z-vB.z},vn=rel.x*n.x+rel.z*n.z;
+  const imA=1/PA.m,iiA=1/PA.I,imB=dynB?1/PB.m:0,iiB=dynB?1/PB.I:0;
+  // positional correction (not through each other)
+  const share=imA/(imA+imB);
+  A.x+=n.x*hit.d*share;A.z+=n.z*hit.d*share;if(dynB){B.x-=n.x*hit.d*(1-share);B.z-=n.z*hit.d*(1-share);}
+  if(vn>=0)return 0;
+  const jr=(r,v)=>r.z*v.x-r.x*v.z;                                       // (the turning a push along v gives, about r)
+  const K=imA+imB+jr(rA,n)**2*iiA+(dynB?jr(rB,n)**2*iiB:0);
+  const j=-(1+0.2)*vn/K;
+  const t={x:-n.z,z:n.x},vt=rel.x*t.x+rel.z*t.z,Kt=imA+imB+jr(rA,t)**2*iiA+(dynB?jr(rB,t)**2*iiB:0);
+  const jt=clamp(-vt/Kt,-0.5*j,0.5*j);
+  const Jx=n.x*j+t.x*jt,Jz=n.z*j+t.z*jt;
+  A.vx+=Jx*imA;A.vz+=Jz*imA;A.yr=(A.yr||0)+jr(rA,{x:Jx,z:Jz})*iiA;
+  if(dynB){B.vx-=Jx*imB;B.vz-=Jz*imB;B.yr=(B.yr||0)-jr(rB,{x:Jx,z:Jz})*iiB;}
+  return -vn;
+}
+function collideCar(c){
+  let impact=0;const A=carBox(c);
+  for(const s of SOLIDS){
+    if(c.x<s.x0-6||c.x>s.x1+6||c.z<s.z0-6||c.z>s.z1+6)continue;
+    const hit=boxHit(A,rectBox(s));if(hit){impact=Math.max(impact,resolve(c,null,hit));A.x=c.x;A.z=c.z;}
+  }
+  for(const q of postsNear(c.x,c.z)){const hit=circleHit(A,q);if(hit){impact=Math.max(impact,resolve(c,null,hit));A.x=c.x;A.z=c.z;}}
   for(const o of ALLCARS){
-    if(o===c||o.hidden||Math.abs(o.x-c.x)>7||Math.abs(o.z-c.z)>7)continue;
-    for(const a of carCircles(c))for(const b of carCircles(o)){
-      const dx=a.x-b.x,dz=a.z-b.z,d=Math.hypot(dx,dz),m=c.hw+o.hw;if(d>=m||d<1e-6)continue;
-      const nx=dx/d,nz=dz/d,push=(m-d);
-      const ovx=o.mode==='ai'?Math.sin(o.a)*o.v:o.vx,ovz=o.mode==='ai'?Math.cos(o.a)*o.v:o.vz;
-      const rel=(c.vx-ovx)*nx+(c.vz-ovz)*nz;
-      if(o.mode==='ai'&&rel>-7){c.x+=nx*push;c.z+=nz*push;if(rel<0){c.vx-=1.3*rel*nx;c.vz-=1.3*rel*nz;}o.bump=1.6;if(rel<-2)horn(o);impact=Math.max(impact,-rel);continue;}
-      if(o.mode==='ai')freeCar(o,ovx,ovz);
-      if(o.mode==='parked')o.mode='free';
-      c.x+=nx*push/2;c.z+=nz*push/2;o.x-=nx*push/2;o.z-=nz*push/2;
-      if(rel<0){const j=-rel*0.65;c.vx+=j*nx;c.vz+=j*nz;o.vx=(o.vx||0)-j*nx;o.vz=(o.vz||0)-j*nz;impact=Math.max(impact,-rel);}
+    if(o===c||o.hidden||Math.abs(o.x-c.x)>6||Math.abs(o.z-c.z)>6)continue;
+    const hit=boxHit(A,carBox(o));if(!hit)continue;
+    const vA=pointVel(c,hit.p),vB=pointVel(o,hit.p),vn=(vA.x-vB.x)*hit.n.x+(vA.z-vB.z)*hit.n.z;
+    if(o.mode==='ai'){
+      if(vn>-7){o.bump=1.6;if(vn<-2)horn(o);}                         // a nudge: the traffic car stops a moment
+      else freeCar(o,Math.sin(o.a)*o.v,Math.cos(o.a)*o.v);              // a real hit: it becomes a body of its own
     }
+    if(o.mode==='parked'){o.mode='free';o.park=true;o.yr=0;}
+    impact=Math.max(impact,resolve(c,o,hit));A.x=c.x;A.z=c.z;
   }
-  if(impact>5&&c===player.car){crash(impact);}
+  return impact;
+}
+// the step: sub-steps of 1/120 s (at 44 m/s a step moves 37 cm, less than a car's width: no passing through walls)
+function vehicleStep(c,inp,dt){
+  if(!c.slips)c.slips=[0,0,0,0];if(c.gear===undefined)c.gear=1;
+  const maxSteer=0.58/(1+Math.abs(c.v)*0.055);
+  c.steer+=(inp.steer*maxSteer-c.steer)*Math.min(1,dt*8);
+  c.acc=(c.acc||0)+dt;let n=0,impact=0;
+  while(c.acc>=PH&&n<8){physStep(c,inp,PH);impact=Math.max(impact,collideCar(c));c.acc-=PH;n++;}
+  if(n>=8)c.acc=0;
+  if(c.mode==='player'){if(impact>5)crash(impact);skidMarks(c);}
+  else if(c.lod===0)skidMarks(c);
 }
 function updateFree(c,dt){
-  carPhysics(c,{up:false,down:false,hand:false,steer:0},dt);
-  if(Math.hypot(c.vx,c.vz)<0.05){c.vx=c.vz=0;c.v=0;c.mode='parked';}
+  // a car pushed or left rolling: a parked one has its handbrake on, a traffic car whose driver fled rolls in neutral
+  if(c.gear===undefined||c.gear>0)c.gear=0;
+  vehicleStep(c,{up:false,down:false,hand:!!c.park,steer:0},dt);
+  if(Math.hypot(c.vx,c.vz)<0.05&&Math.abs(c.yr||0)<0.02){c.stillT=(c.stillT||0)+dt;if(c.stillT>0.5){c.vx=c.vz=0;c.v=0;c.yr=0;c.mode='parked';c.stillT=0;}}
+  else c.stillT=0;
+}
+
+// ---- tyre marks on the road where a tyre slides (a ring of quads)
+const SKID_N=MOBILE?300:700;let SKID=null;
+function skidInit(){
+  const g=new THREE.BufferGeometry(),pos=new Float32Array(SKID_N*4*3),idx=new Uint32Array(SKID_N*6);
+  for(let i=0;i<SKID_N;i++){const b=i*4;idx.set([b,b+1,b+2,b,b+2,b+3],i*6);}
+  g.setAttribute('position',new THREE.BufferAttribute(pos,3));g.setIndex(new THREE.BufferAttribute(idx,1));g.setDrawRange(0,0);
+  const m=new THREE.MeshBasicMaterial({color:0x141414,transparent:true,opacity:0.42,depthWrite:false,side:THREE.DoubleSide,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
+  const mesh=new THREE.Mesh(g,m);mesh.frustumCulled=false;mesh.renderOrder=1;scene.add(mesh);
+  SKID={g,pos,i:0,n:0,total:0};
+}
+function skidMarks(c){
+  if(!SKID)skidInit();
+  const P=carSpec(c),sa=Math.sin(c.a),ca=Math.cos(c.a);
+  for(let i=0;i<4;i++){
+    const W=P.W[i],zl=W.z+P.zc,px=c.x+sa*zl+ca*W.x,pz=c.z+ca*zl-sa*W.x,wh=c.wheels[i];
+    if(!c.slips[i]){wh.mark=null;continue;}
+    if(!wh.mark){wh.mark={x:px,z:pz};continue;}
+    const dx=px-wh.mark.x,dz=pz-wh.mark.z,d=Math.hypot(dx,dz);if(d<0.3)continue;
+    const nx=-dz/d*0.1,nz=dx/d*0.1,y=groundY(px,pz)+0.012,k=SKID.i*12,a=wh.mark;
+    SKID.pos.set([a.x+nx,y,a.z+nz,a.x-nx,y,a.z-nz,px-nx,y,pz-nz,px+nx,y,pz+nz],k);
+    SKID.i=(SKID.i+1)%SKID_N;SKID.n=Math.min(SKID_N,SKID.n+1);SKID.total++;
+    SKID.g.attributes.position.needsUpdate=true;SKID.g.setDrawRange(0,SKID.n*6);
+    wh.mark={x:px,z:pz};
+  }
 }
 
 // =====================================================================================================
@@ -1448,6 +1618,7 @@ function enterCar(c){
     c.vx=Math.sin(c.a)*c.v;c.vz=Math.cos(c.a)*c.v;c.ai=null;
   }
   c.mode='player';player.car=c;seatPerson(player.model,c);c.door.hold=0.45;c.ind=0;   // the door opens, and shuts behind them
+  c.park=false;c.gear=1;c.yr=c.yr||0;
   const wi=WALKERS.indexOf(player);if(wi>=0)WALKERS.splice(wi,1);
   if(job)jobEvent('enter',c);
   camYaw=c.a;
@@ -1458,6 +1629,7 @@ function exitCar(){
   const o={x:c.x+l.x*(c.hw+0.75),z:c.z+l.z*(c.hw+0.75)};collideCircle(o,0.35);
   player.x=o.x;player.z=o.z;player.a=c.a;player.vy=0;
   unseat(player.model);player.car=null;c.mode=Math.hypot(c.vx,c.vz)>0.2?'free':'parked';c.braking=false;c.ind=0;c.door.hold=0.6;
+  c.park=true;c.thr=0;   // (the handbrake on)
   WALKERS.push(player);camYaw=c.a;
 }
 function updatePlayer(dt){
@@ -1465,7 +1637,7 @@ function updatePlayer(dt){
   if(player.car){
     const c=player.car,inp={up:keys.has('KeyW')||keys.has('ArrowUp')||touch.y<-0.3,down:keys.has('KeyS')||keys.has('ArrowDown')||touch.y>0.3,
       hand:keys.has('Space'),steer:(keys.has('KeyA')||keys.has('ArrowLeft')?1:0)-(keys.has('KeyD')||keys.has('ArrowRight')?1:0)-touch.x};
-    carPhysics(c,inp,dt);engine(Math.abs(c.v),inp.up);
+    vehicleStep(c,inp,dt);engine(c.rpm||IDLE,c.thr,c.slide||0);
     // the indicator comes on by itself in a sharp, slow turn
     if(Math.abs(c.steer)>0.22&&Math.abs(c.v)<9){c.ind=Math.sign(c.steer);c.indHold=0.9;}else if(c.indHold<=0)c.ind=0;
     if(m.hero)animHero(m,dt,{seated:true,speed:0,ground:true});
@@ -1474,7 +1646,7 @@ function updatePlayer(dt){
     player.x=c.x;player.z=c.z;
     return;
   }
-  engine(0,false);
+  engine(0,false,0);
   // on foot: move relative to the camera
   const fw=(keys.has('KeyW')||keys.has('ArrowUp')?1:0)-(keys.has('KeyS')||keys.has('ArrowDown')?1:0)-touch.y,
         st=(keys.has('KeyD')||keys.has('ArrowRight')?1:0)-(keys.has('KeyA')||keys.has('ArrowLeft')?1:0)+touch.x;
@@ -1645,9 +1817,14 @@ function initAudio(){
   const o=AC.createOscillator(),o2=AC.createOscillator(),f=AC.createBiquadFilter(),g=AC.createGain();
   o.type='sawtooth';o2.type='square';f.type='lowpass';f.frequency.value=420;g.gain.value=0;
   o.connect(f);o2.connect(f);f.connect(g);g.connect(AC.destination);o.start();o2.start();eng={o,o2,g,f};
+  // the tyres' squeal: noise through a narrow band
+  const nb=AC.createBuffer(1,AC.sampleRate,AC.sampleRate),nd=nb.getChannelData(0);for(let i=0;i<nd.length;i++)nd[i]=Math.random()*2-1;
+  const ns=AC.createBufferSource(),bf=AC.createBiquadFilter(),sg=AC.createGain();ns.buffer=nb;ns.loop=true;bf.type='bandpass';bf.frequency.value=1150;bf.Q.value=6;
+  sg.gain.value=0;ns.connect(bf);bf.connect(sg);sg.connect(AC.destination);ns.start();eng.sq={g:sg};
 }
-function engine(v,on){if(!eng)return;const t=AC.currentTime,hz=38+v*3.2+(on?12:0);eng.o.frequency.setTargetAtTime(hz,t,0.08);eng.o2.frequency.setTargetAtTime(hz*0.5,t,0.08);
-  eng.g.gain.setTargetAtTime(player.car?(on?0.05:0.032):0,t,0.12);eng.f.frequency.setTargetAtTime(300+v*22,t,0.1);}
+function engine(rpm,on,slide){if(!eng)return;const t=AC.currentTime,hz=rpm/60*2;eng.o.frequency.setTargetAtTime(hz,t,0.05);eng.o2.frequency.setTargetAtTime(hz*0.5,t,0.05);
+  eng.g.gain.setTargetAtTime(player.car?(on?0.05:0.032):0,t,0.12);eng.f.frequency.setTargetAtTime(250+rpm*0.12,t,0.08);
+  if(eng.sq)eng.sq.g.gain.setTargetAtTime(player.car?Math.min(0.07,(slide||0)*0.022):0,t,0.05);}
 function tone(hz,dur,type,vol){if(!AC)return;const o=AC.createOscillator(),g=AC.createGain();o.type=type||'square';o.frequency.value=hz;g.gain.value=vol||0.05;
   g.gain.setTargetAtTime(0,AC.currentTime+dur*0.7,dur*0.2);o.connect(g);g.connect(AC.destination);o.start();o.stop(AC.currentTime+dur);}
 let hornT=0;
@@ -1687,7 +1864,8 @@ function updateHUD(dt){
   hudT-=dt;if(hudT>0)return;hudT=0.1;
   drawMap();
   const sp=$('speed');sp.hidden=!player.car;
-  if(player.car){const v=Math.round(Math.abs(player.car.v)*3.6);sp.querySelector('.n').textContent=CAR_NAME[player.car.kind];
+  if(player.car){const v=Math.round(Math.abs(player.car.v)*3.6),gr=player.car.gear;
+    sp.querySelector('.n').textContent=CAR_NAME[player.car.kind]+'  ·  '+(gr===-1?'R':gr===0?'N':'D'+gr);
     sp.querySelector('.v').firstChild.nodeValue=v;sp.querySelector('.bar i').style.width=Math.min(100,v/1.6)+'%';}
   const mins=600+Math.floor(clock/2),txt=String(Math.floor(mins/60)%24).padStart(2,'0')+':'+String(mins%60).padStart(2,'0');   // a game minute every 2 s
   if($('clock').textContent!==txt)$('clock').textContent=txt;
@@ -1799,9 +1977,10 @@ $('play').addEventListener('click',startGame);
 requestAnimationFrame(frame);
 // for automated checks
 window.__city={get state(){return state;},start:startGame,player,cars:ALLCARS,peds,keys,camera,renderer,scene,NODES,SIGNALS,CHUNKS,NPC_T,DRIVERS,knock,npcLOD,get npcIds(){return NPC_IDS;},
-  get job(){return job;},get money(){return money;},cancelJob(){if(job)endJob(false,'');jobCool=0;},light,enterCar,exitCar,nearestCar,freeCar,CARS,setLamps,
+  get job(){return job;},get money(){return money;},cancelJob(){if(job)endJob(false,'');jobCool=0;},light,enterCar,exitCar,nearestCar,freeCar,CARS,setLamps,boxHit,carBox,carSpec,SOLIDS,Xs,Zs,groundY,get skid(){return SKID;},
   setYaw(v){camYaw=v;lookT=2;},setPitch(v){camPitch=v;},
-  step(n,dt){dt=dt||1/60;for(let i=0;i<n;i++)update(dt);renderer.render(scene,camera);}};
+  step(n,dt){dt=dt||1/60;for(let i=0;i<n;i++)update(dt);renderer.render(scene,camera);},
+  tick(n,dt){dt=dt||1/60;for(let i=0;i<n;i++)update(dt);}};
 
 })();
 </script>

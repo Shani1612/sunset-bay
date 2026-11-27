@@ -71,6 +71,13 @@ SUV = dict(
     track=1.60, tyre=(225, 60, 17), clearance=0.20, arch_gap=0.055, rim='wide5', vmax=42, name_he='רכב פנאי', seat=None, cladding=True,
 )
 SPECS = {'hatch': HATCH, 'sedan': SEDAN, 'suv': SUV}
+# for the game's physics: mass (kg), the centre of gravity's height, driven wheels, power, the gearbox
+HATCH.update(mass=1200, cog_h=0.52, drive='fwd', power_kw=90, torque_nm=200, gears=[3.55, 2.05, 1.38, 1.03, 0.84, 0.70], final_drive=4.06)
+SEDAN.update(mass=1400, cog_h=0.50, drive='fwd', power_kw=120, torque_nm=250, gears=[3.45, 2.00, 1.33, 1.00, 0.80, 0.66], final_drive=3.90)
+SUV.update(mass=1650, cog_h=0.62, drive='awd', power_kw=135, torque_nm=280, gears=[3.70, 2.10, 1.40, 1.04, 0.84, 0.69], final_drive=4.10)
+for _S in SPECS.values():
+    _S['bump'] = round(_S['arch_gap'] - 0.024, 3)      # suspension travel: up (into the arch, checked) and down
+    _S['droop'] = 0.06
 
 
 def hatch_stations(S):
@@ -335,15 +342,19 @@ def transfer_normals(ob, src):
     sharp.data.foreach_set('value', vals)
     for p in me.polygons:
         p.use_smooth = True
-    vg = ob.vertex_groups.new(name='_panels')
-    on_well = set(v for p in ob.data.polygons if p.material_index == well for v in p.vertices)
-    vg.add([v.index for v in ob.data.vertices if v.index not in on_well], 1.0, 'REPLACE')
+    # every panel corner takes the smooth body's normal, the arch's rim too (its corners on the panel side);
+    # then the wells' own corners go back to their faces' normals
     md = ob.modifiers.new('Normals', 'DATA_TRANSFER'); md.object = src
     md.use_loop_data = True; md.data_types_loops = {'CUSTOM_NORMAL'}; md.loop_mapping = 'POLYINTERP_NEAREST'
-    md.vertex_group = '_panels'
     with bpy.context.temp_override(object=ob, active_object=ob):
         bpy.ops.object.modifier_apply(modifier='Normals')
-    ob.vertex_groups.remove(ob.vertex_groups['_panels'])     # (by name: the old reference is stale after the apply)
+    me = ob.data
+    cn = [n.vector.copy() for n in me.corner_normals]
+    for p in me.polygons:
+        if p.material_index == well:
+            for li in range(p.loop_start, p.loop_start + p.loop_total):
+                cn[li] = p.normal.copy()
+    me.normals_split_custom_set(cn)
 
 
 ARCH_SEGS = 64
@@ -397,6 +408,77 @@ def inside_poly(pts, u, v):
     return c
 
 
+def cpatch(bm, surf, O, U, V, D, u0, u1, lo, hi, nu, nv, mat, off, skirt=0.004, mirror=False):
+    """A patch shaped to an outline: columns across u0..u1 (closer at the ends),
+    each from lo(u) to hi(u) with its rows evenly between, so the patch's edge
+    is the outline itself (no steps). mat(u, t, v) chooses each cell's material
+    (t: 0 at the bottom edge, 1 at the top: bands that follow the outline).
+    Projected along D onto the body and lifted `off`, with a skirt like patch()."""
+    O, U, V, D = Vector(O), Vector(U), Vector(V), Vector(D).normalized()
+    nu = max(3, int(round(nu * LOW['patch']))); nv = max(2, int(round(nv * LOW['patch'])))
+    us = [u0 + (u1 - u0) * (1 - math.cos(math.pi * i / nu)) / 2 for i in range(nu + 1)]
+    cols = []
+    for u in us:
+        uu = min(max(u, u0 + 1e-6), u1 - 1e-6)
+        a, b = lo(uu), hi(uu)
+        if a is None or b is None or b < a:
+            a = b = (a if a is not None else b) or 0.0
+        cols.append([a + (b - a) * j / nv for j in range(nv + 1)])
+    hits = {}
+    for i, u in enumerate(us):
+        for j, v in enumerate(cols[i]):
+            P_ = O + U * u + V * v
+            loc, nrm = surf.hit(P_ - D * 2.0, D)
+            hits[(i, j)] = None if loc is None else (loc, nrm)
+    kind = bm.verts.layers.int.get('kind') or bm.verts.layers.int.new('kind')
+    for side in ((1, -1) if mirror else (1,)):
+        flip = lambda p: Vector((p.x, side * p.y, p.z))
+        vert = {}
+        for c, h in hits.items():
+            if h is None:
+                continue
+            key = (c[0], 0 if cols[c[0]][-1] - cols[c[0]][0] < 1e-6 else c[1])      # (a column of one point)
+            if key not in vert:
+                vert[key] = bm.verts.new(flip(h[0] + h[1] * off)); vert[key][kind] = 1
+            vert[c] = vert[key]
+        edge = {}
+        for i in range(nu):
+            for j in range(nv):
+                q = [(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)]
+                if any(c not in vert for c in q):
+                    continue
+                vs = []
+                for c in q:
+                    if vert[c] not in vs:
+                        vs.append(vert[c])
+                if len(vs) < 3:
+                    continue
+                f = bm.faces.new(vs if side > 0 else vs[::-1])
+                um = (us[i] + us[i + 1]) / 2; tm = (j + 0.5) / nv
+                f.material_index = mat(um, tm, (cols[i][j] + cols[i + 1][j + 1]) / 2)
+                for k in range(len(vs)):
+                    e = frozenset((vs[k], vs[(k + 1) % len(vs)]))
+                    edge[e] = edge.get(e, 0) + 1
+        if skirt:
+            low = {}
+            for e, n_ in edge.items():
+                if n_ != 1:
+                    continue
+                a_, b_ = tuple(e)
+                for v_ in (a_, b_):
+                    if v_ not in low:
+                        low[v_] = bm.verts.new(v_.co - surf_normal(surf, v_.co) * (off + skirt))
+                g = bm.faces.new((a_, b_, low[b_], low[a_]))
+                g.material_index = DM['Trim']
+    return True
+
+
+def surf_normal(surf, co):
+    """The body's normal nearest to co."""
+    loc, nrm, i_, d_ = surf.bvh.find_nearest(co)
+    return nrm if nrm is not None else Vector((0, 0, 1))
+
+
 def patch(bm, surf, O, U, V, D, box2, nu, nv, keep, mat, off, skirt=0.004, mirror=False):
     """A patch of the body's surface: a grid over box2 = (u0, u1, v0, v1) in the
     plane O + u U + v V, projected along D onto the body and lifted `off` along
@@ -424,9 +506,10 @@ def patch(bm, surf, O, U, V, D, box2, nu, nv, keep, mat, off, skirt=0.004, mirro
     for side in ((1, -1) if mirror else (1,)):
         flip = lambda p: Vector((p.x, side * p.y, p.z))
         vert = {}
+        kind = bm.verts.layers.int.get('kind') or bm.verts.layers.int.new('kind')
         for c, h in corners.items():
             if h is not None:
-                vert[c] = bm.verts.new(flip(h[0] + h[1] * off))
+                vert[c] = bm.verts.new(flip(h[0] + h[1] * off)); vert[c][kind] = 1
         edge_count = {}
         for i, j in cells:
             q = [(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)]
@@ -490,6 +573,25 @@ def strip(bm, surf, pts, D, width, off, mi, mirror=False, n_per_m=80, force=Fals
 
 
 LOW = dict(patch=1.0, blob=1.0, strips_off=False)     # the far model's resolution (set while it is built)
+
+
+def tube(bm, pts, hw, hh, mi, segs=12, e=4.0):
+    """A bar swept along pts: a rounded rectangle across it (hw wide, hh high), its ends closed."""
+    if len(pts) < 2:
+        return
+    def se(a, ex):
+        return math.copysign(abs(a) ** (2.0 / ex), a)
+    rings = []
+    for k, p in enumerate(pts):
+        t = (pts[min(k + 1, len(pts) - 1)] - pts[max(k - 1, 0)]).normalized()
+        side = t.cross(Vector((0, 0, 1))).normalized(); up = side.cross(t).normalized()
+        rings.append([bm.verts.new(p + side * (hw * se(math.cos(2 * math.pi * i / segs), e)) + up * (hh * se(math.sin(2 * math.pi * i / segs), e)))
+                      for i in range(segs)])
+    for a, b in zip(rings[:-1], rings[1:]):
+        for i in range(segs):
+            bm.faces.new((a[i], b[i], b[(i + 1) % segs], a[(i + 1) % segs])).material_index = mi
+    bm.faces.new(rings[0][::-1]).material_index = mi
+    bm.faces.new(rings[-1]).material_index = mi
 
 
 def blob(bm, center, half, e=4.0, nu=20, nv=12, mi=0, rot=None):
@@ -765,6 +867,16 @@ VIEWS = [('side', (0, 9.0, 0.75), (0, 0, 0.72), 50), ('front34', (6.2, 4.6, 1.5)
          ('rear', (-8.5, 0, 1.0), (0, 0, 0.7), 50), ('top', (0.01, 0, 11), (0, 0, 0), 40)]
 
 
+def trap(u, z0, z1, h0, h1):
+    """A trapezoid (half width h0 at z0, h1 at z1): its (bottom, top) at u."""
+    a = abs(u)
+    if a <= min(h0, h1):
+        return z0, z1
+    t = min(max((a - h0) / (h1 - h0), 0.0), 1.0)
+    v = z0 + t * (z1 - z0)
+    return (v, z1) if h1 > h0 else (z0, v)
+
+
 def poly_edge(pts, u, top=True):
     """The outline's upper (or lower) edge height at u (outline drawn left to right on top, back on the bottom)."""
     best = None
@@ -842,8 +954,8 @@ DETAILS = {
         grille_top=dict(z=(0.845, 0.90), half=(0.32, 0.27)),
         grille=dict(z=(0.52, 0.79), half_top=0.48, half_bottom=0.52),
         fog=dict(y=0.70, z=0.49, r=0.045),
-        lip=dict(z=(0.33, 0.42), half=0.66), skid_front=dict(z=(0.34, 0.41), half=0.34),
-        plate_front=dict(z=0.455),
+        lip=dict(z=(0.33, 0.40), half=0.66), skid_front=dict(z=(0.335, 0.395), half=0.34),
+        plate_front=dict(z=0.47),
         tail=dict(T=(-2.23, 0.40, 1.06), D=(1, -0.55, 0), outline=[(0.0, -0.055), (0.20, -0.060), (0.38, -0.050), (0.48, -0.018),
               (0.50, 0.040), (0.40, 0.062), (0.20, 0.066), (0.0, 0.050)], bar=0.013, rev_u=0.09, ind_u=(0.09, 0.19)),
         plate_rear=dict(z=0.76),
@@ -881,40 +993,45 @@ def add_details(key, surf, S, paint_ob, split_door=True):
     pts = H['outline']
     pu, pv, pr = H['projector']
 
-    def head_mat(u, v):
-        top = poly_edge(pts, u, True)
-        if (u - pu) ** 2 + (v - pv) ** 2 < pr ** 2:
-            return DM['GlossBlack'] if (u - pu) ** 2 + (v - pv) ** 2 < (pr * 0.62) ** 2 else DM['Chrome']
+    def head_mat(u, t, v):                                    # (bands that follow the lamp's outline)
         if u > H['ind_u']:
             return DM['IndL']
-        if top is not None and v > top - 0.011:
-            return DM['DRL']
-        return DM['Lens']
-    us = [p[0] for p in pts]; vs_ = [p[1] for p in pts]
+        return DM['DRL'] if t > 0.80 else DM['Lens']
+    us = [p[0] for p in pts]
     for side in (1, -1):
         Ds = Vector((D.x, D.y * side, D.z)); Us = Vector((U.x, U.y * side, U.z)); T = Vector((H['T'][0], H['T'][1] * side, H['T'][2]))
-        m = (lambda f: (lambda u, v: f(u, v) if side > 0 or f(u, v) != DM['IndL'] else DM['IndR']))(head_mat)
-        patch(bm, surf, T, Us, V, Ds, (min(us), max(us), min(vs_), max(vs_)), 60, 14, lambda u, v: inside_poly(pts, u, v), m, 0.004)
+        m = (lambda f, sd: (lambda u, t, v: f(u, t, v) if sd > 0 or f(u, t, v) != DM['IndL'] else DM['IndR']))(head_mat, side)
+        cpatch(bm, surf, T, Us, V, Ds, min(us), max(us), lambda u: poly_edge(pts, u, False), lambda u: poly_edge(pts, u, True),
+               44, 8, m, 0.004)
+        # the projector: a chrome ring and its dark lens, round, on the lamp
+        loc, nrm = surf.hit(T + Us * pu + V * pv - Ds * 2.0, Ds)
+        if loc is not None:
+            blob(bm, loc + nrm * 0.0055, (0.0025, pr, pr), e=2.2, nu=20, nv=6, mi=DM['Chrome'], rot=frame(nrm))
+            blob(bm, loc + nrm * 0.0068, (0.0018, pr * 0.62, pr * 0.62), e=2.2, nu=16, nv=6, mi=DM['GlossBlack'], rot=frame(nrm))
     # ---- grilles, fog lamps, lip, front plate (projected straight from the front)
     Dx = Vector((-1, 0, 0)); Uy = Vector((0, 1, 0))
-    g = P['grille_top']
-    patch(bm, surf, (2.5, 0, 0), Uy, V, Dx, (-g['half'][0], g['half'][0], g['z'][0], g['z'][1]), 30, 4,
-          lambda u, v: abs(u) < g['half'][1] + (g['half'][0] - g['half'][1]) * (v - g['z'][0]) / (g['z'][1] - g['z'][0]), lambda u, v: DM['GlossBlack'], 0.003)
+    g = P['grille_top']                                       # (a trapezoid: half[1] wide at its foot, half[0] at its top)
+    z0, z1, h0, h1 = g['z'][0], g['z'][1], g['half'][1], g['half'][0]
+    cpatch(bm, surf, (2.5, 0, 0), Uy, V, Dx, -max(h0, h1), max(h0, h1), lambda u: trap(u, z0, z1, h0, h1)[0],
+           lambda u: trap(u, z0, z1, h0, h1)[1], 36, 3, lambda u, t, v: DM['GlossBlack'], 0.003)
     g = P['grille']
-    def in_grille(u, v):
-        t = (v - g['z'][0]) / (g['z'][1] - g['z'][0])
-        return abs(u) < g['half_bottom'] + (g['half_top'] - g['half_bottom']) * t
-    patch(bm, surf, (2.5, 0, 0), Uy, V, Dx, (-g['half_bottom'], g['half_bottom'], g['z'][0], g['z'][1]), 50, 14, in_grille,
-          lambda u, v: DM['Grille'], 0.0025)
+    z0, z1, h0, h1 = g['z'][0], g['z'][1], g['half_bottom'], g['half_top']
+    cpatch(bm, surf, (2.5, 0, 0), Uy, V, Dx, -max(h0, h1), max(h0, h1), lambda u: trap(u, z0, z1, h0, h1)[0],
+           lambda u: trap(u, z0, z1, h0, h1)[1], 44, 8, lambda u, t, v: DM['Grille'], 0.0025)
     for k in range(0 if LOW['strips_off'] else 5):            # horizontal bars across the grille
         z = g['z'][0] + (g['z'][1] - g['z'][0]) * (k + 0.5) / 5
         hw_ = g['half_bottom'] + (g['half_top'] - g['half_bottom']) * (k + 0.5) / 5 - 0.03
         strip(bm, surf, [(2.5, -hw_, z), (2.5, hw_, z)], Dx, 0.010, 0.006, DM['GlossBlack'])
     f = P['fog']
-    for side in (1, -1):
-        patch(bm, surf, (2.5, 0, 0), Uy, V, Dx, (side * f['y'] - f['r'] * 1.6, side * f['y'] + f['r'] * 1.6, f['z'] - f['r'] * 1.3, f['z'] + f['r'] * 1.3),
-              16, 10, lambda u, v, s_=side: ((u - s_ * f['y']) / 1.55) ** 2 + ((v - f['z']) / 1.25) ** 2 < f['r'] ** 2,
-              lambda u, v, s_=side: DM['Reflector'] if (u - s_ * f['y']) ** 2 + (v - f['z']) ** 2 < (f['r'] * 0.8) ** 2 else DM['Trim'], 0.003)
+    rx, rz = f['r'] * 1.55, f['r'] * 1.25
+    for side in (1, -1):                                      # an oval bezel, its round lamp inside
+        cy = side * f['y']
+        hh = lambda u, cy=cy: rz * math.sqrt(max(0.0, 1 - ((u - cy) / rx) ** 2))
+        cpatch(bm, surf, (2.5, 0, 0), Uy, V, Dx, cy - rx, cy + rx, lambda u, hh=hh: f['z'] - hh(u), lambda u, hh=hh: f['z'] + hh(u),
+               18, 4, lambda u, t, v: DM['Trim'], 0.003)
+        loc, nrm = surf.hit((2.5, cy, f['z']), Dx)
+        if loc is not None:
+            blob(bm, loc + nrm * 0.0045, (0.002, f['r'] * 0.8, f['r'] * 0.8), e=2.2, nu=20, nv=6, mi=DM['Reflector'], rot=frame(nrm))
     l_ = P['lip']
     patch(bm, surf, (2.5, 0, 0), Uy, V, Dx, (-l_['half'], l_['half'], l_['z'][0], l_['z'][1]), 40, 3, lambda u, v: True, lambda u, v: DM['Trim'], 0.003)
     add_plate(bm, surf, +1, P['plate_front']['z'])
@@ -925,19 +1042,20 @@ def add_details(key, surf, S, paint_ob, split_door=True):
         U = -U
     pts2 = T_['outline']
 
-    def tail_mat(u, v):
-        if abs(v - 0.005) < T_['bar'] and u > 0.03:
+    def tail_mat(u, t, v):                                    # (bands that follow the lamp's outline)
+        if 0.45 <= t < 0.70 and u > 0.03:
             return DM['Brake']
-        if u < T_['rev_u'] and v < -0.008:
+        if u < T_['rev_u'] and t < 0.40:
             return DM['Reverse']
-        if T_['ind_u'][0] <= u < T_['ind_u'][1] and v < -0.015:
+        if T_['ind_u'][0] <= u < T_['ind_u'][1] and t < 0.40:
             return DM['IndL']
         return DM['Tail']
-    us = [p[0] for p in pts2]; vs_ = [p[1] for p in pts2]
+    us = [p[0] for p in pts2]
     for side in (1, -1):
         Ds = Vector((D.x, D.y * side, D.z)); Us = Vector((U.x, U.y * side, U.z)); T = Vector((T_['T'][0], T_['T'][1] * side, T_['T'][2]))
-        m = (lambda f: (lambda u, v: f(u, v) if side > 0 or f(u, v) != DM['IndL'] else DM['IndR']))(tail_mat)
-        patch(bm, surf, T, Us, V, Ds, (min(us), max(us), min(vs_), max(vs_)), 72, 20, lambda u, v: inside_poly(pts2, u, v), m, 0.004)
+        m = (lambda f, sd: (lambda u, t, v: f(u, t, v) if sd > 0 or f(u, t, v) != DM['IndL'] else DM['IndR']))(tail_mat, side)
+        cpatch(bm, surf, T, Us, V, Ds, min(us), max(us), lambda u: poly_edge(pts2, u, False), lambda u: poly_edge(pts2, u, True),
+               48, 10, m, 0.004)
     # ---- rear: diffuser, plate
     Dr = Vector((1, 0, 0))
     d_ = P['diffuser']
@@ -972,19 +1090,18 @@ def add_details(key, surf, S, paint_ob, split_door=True):
             q = P[k_]
             patch(bm, surf, (sgn, 0, 0), Uy, V, Dk, (-q['half'], q['half'], q['z'][0], q['z'][1]), 30, 3, lambda u, v: True,
                   lambda u, v: DM['Rim'], 0.0045)
-    if 'roof_rails' in P:
+    if 'roof_rails' in P:                                     # one smooth bar each side, its feet on the roof
         rr_ = P['roof_rails']
+        n_r = 16 if LOW['strips_off'] else 48
         for side in (1, -1):
             pts_r = []
-            for k in range(25):
-                x = rr_['x'][0] + (rr_['x'][1] - rr_['x'][0]) * k / 24
+            for k in range(n_r + 1):
+                x = rr_['x'][0] + (rr_['x'][1] - rr_['x'][0]) * k / n_r
                 loc, nrm = surf.hit((x, side * rr_['y'], 3.0), (0, 0, -1))
                 if loc is not None:
-                    lift = rr_['h'] * (1 - (abs(k - 12) / 12) ** 8)
-                    pts_r.append(loc + Vector((0, 0, lift + 0.004)))
-            for a_, b_ in zip(pts_r[:-1], pts_r[1:]):
-                blob(bm, (a_ + b_) / 2, ((b_ - a_).length / 2 + 0.004, 0.014, 0.010), e=4, nu=10, nv=6, mi=DM['Rim'],
-                     rot=Vector((1, 0, 0)).rotation_difference((b_ - a_).normalized()).to_matrix())
+                    f_ = abs(2 * k / n_r - 1)
+                    pts_r.append(loc + Vector((0, 0, rr_['h'] * (1 - f_ ** 8) + 0.004)))
+            tube(bm, pts_r, 0.014, 0.010, DM['Rim'], segs=8 if LOW['strips_off'] else 12)
     if P.get('flares'):
         R = tyre_radius(S); xa, xb = axles(S)
         for xc in (xa, xb):
@@ -1003,8 +1120,9 @@ def add_details(key, surf, S, paint_ob, split_door=True):
             if loc is None:
                 continue
             bm_ = bmd if (side > 0 and hi == 0) else bm
-            patch(bm_, surf, (x, side * 1.5, z), (1, 0, 0), (0, 0, 1), (0, -side, 0), (-0.075, 0.075, -0.026, 0.026), 10, 4,
-                  lambda u, v: (u / 0.075) ** 4 + (v / 0.026) ** 4 < 1, lambda u, v: DM['GlossBlack'], 0.0008, skirt=0)
+            he = lambda u: 0.026 * max(0.0, 1 - (u / 0.075) ** 4) ** 0.25
+            cpatch(bm_, surf, (x, side * 1.5, z), (1, 0, 0), (0, 0, 1), (0, -side, 0), -0.075, 0.075, lambda u, he=he: -he(u),
+                   lambda u, he=he: he(u), 12, 3, lambda u, t, v: DM['GlossBlack'], 0.0012, skirt=0)
             blob(bm_, loc + nrm * 0.010, (0.062, 0.010, 0.013), e=3.5, nu=16, nv=8, mi=DM['Paint'],
                  rot=Vector((0, 1, 0)).rotation_difference(Vector((0, side, 0)) if side > 0 else Vector((0, 1, 0))).to_matrix())
     # ---- mirrors (housing in body colour, black base, glass, a repeater)
@@ -1035,6 +1153,7 @@ def add_details(key, surf, S, paint_ob, split_door=True):
     if loc is not None and not LOW['strips_off']:
         blob(bm, loc + Vector((0, 0, 0.028)), (0.075, 0.022, 0.034), e=2.4, nu=16, nv=8, mi=DM['GlossBlack'])
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bmesh.ops.dissolve_degenerate(bm, dist=1e-6, edges=bm.edges)
     if not split_door:
         return obj_from_bm(bm, key + '_details'), None
     bmesh.ops.recalc_face_normals(bmd, faces=bmd.faces)
@@ -1358,8 +1477,16 @@ def build_cabin(key, S, st, body, C, full_bvh, lo=False):
     Ws = S['width'] / 2
 
     def half_w(x, z, margin=0.012):
+        """The inside's half width at (x, z), or None where that point isn't inside the body."""
         loc, n_, i_, d_ = full_bvh.ray_cast(Vector((x, 0, z)), Vector((0, 1, 0)), 3.0)
-        return (loc.y if loc is not None else Ws) - margin
+        if loc is None or not is_inside(full_bvh, Vector((x, 0, z))):
+            return None
+        return loc.y - margin
+
+    def under(x):
+        """The underside's height on the car's middle line at x."""
+        loc, n_, i_, d_ = full_bvh.ray_cast(Vector((x, 0, -1.0)), Vector((0, 0, 1)), 3.0)
+        return loc.z if loc is not None else None
 
     # ---- the inner skin
     faces = []
@@ -1370,13 +1497,28 @@ def build_cabin(key, S, st, body, C, full_bvh, lo=False):
         if cc.z < zf - 0.005 or cc.x > xc + 0.005 or cc.x < xb:
             continue
         faces.append(f)
-    offset_shell(bm, faces, lambda v: 0.068 if v.is_boundary else 0.025 + 0.03 * min(1.0, abs(v.normal.y) / 0.8),
+    inner = offset_shell(bm, faces, lambda v: 0.068 if v.is_boundary else 0.025 + 0.03 * min(1.0, abs(v.normal.y) / 0.8),
                  lambda f: DM['Headliner'] if f.calc_center_median().z > st_at(st, f.calc_center_median().x, 'zgb') + 0.03 else DM['Interior'],
                  lambda e, f: DM['Trim'] if (len(e.link_faces) == 1 or any(nm(g) == 'Glass' for g in e.link_faces if g is not f)) else None,
                  nrm_of=lambda v: (Vector((0, 1 if v.co.y > 0 else -1, 0)) if (v.is_boundary or any(e.other_vert(v).is_boundary for e in v.link_edges)) else
                                    sum((f.normal for f in v.link_faces if nm(f) != 'Well'), Vector()).normalized()
                                    if any(nm(f) != 'Well' for f in v.link_faces) else v.normal),
                  lip=0.04)
+    # (where the panels curl round an arch's edge, their inside would fall into the wheel well: it goes round it)
+    R_t = tyre_radius(S); Wi = well_inner(S); gone = set()
+    for xa in axles(S):
+        ctr = Vector((xa, 0.0, R_t)); rr = R_t + S['arch_gap'] + 0.012
+        for v in inner.values():
+            if abs(v.co.y) < Wi - 0.01:
+                continue
+            d = Vector((v.co.x - ctr.x, 0.0, v.co.z - ctr.z))
+            if d.length < rr:
+                if v.co.z < ctr.z:                      # (below the axle the well is open: nothing to go round)
+                    gone.add(v); continue
+                d = d.normalized() if d.length > 1e-6 else Vector((0, 0, 1))
+                v.co.x, v.co.z = ctr.x + d.x * rr, ctr.z + d.z * rr
+    if gone:
+        bmesh.ops.delete(bm, geom=list(gone), context='VERTS')
     # ---- the wheel wells, from the inside
     for f in src.faces:
         if nm(f) != 'Well':
@@ -1384,7 +1526,10 @@ def build_cabin(key, S, st, body, C, full_bvh, lo=False):
         cc = f.calc_center_median()
         if cc.z < zf - 0.02 or cc.x > xc or any(abs(v.co.y) > Ws - 0.06 for v in f.verts):
             continue                                    # (not near the arch's lip: the liner would show outside)
-        vs = [bm.verts.new(v.co - f.normal * 0.012) for v in reversed(f.verts)]
+        cos_ = [v.co - f.normal * 0.012 for v in reversed(f.verts)]
+        if not all(is_inside(full_bvh, c) for c in cos_):
+            continue                                    # (nor where the body tucks in under the arch's edge)
+        vs = [bm.verts.new(c) for c in cos_]
         bm.faces.new(vs).material_index = DM['Interior']
     src.free()
 
@@ -1393,7 +1538,13 @@ def build_cabin(key, S, st, body, C, full_bvh, lo=False):
         prev = None
         for x in xs:
             z = z_of(x)
-            w = half_w(x, z + 0.015)
+            w = None
+            if z is not None:                               # (the narrower of the width at its own height and just above)
+                ws_ = [half_w(x, z + dz) for dz in (0.004, 0.03)]
+                w = None if None in ws_ else min(ws_)
+            if w is None or w < 0.05:                       # (outside the body here: the strip stops)
+                prev = None
+                continue
             row = (bm.verts.new((x, -w, z)), bm.verts.new((x, w, z)))
             if prev:
                 f = bm.faces.new((prev[0], prev[1], row[1], row[0]))
@@ -1410,6 +1561,9 @@ def build_cabin(key, S, st, body, C, full_bvh, lo=False):
         for k in range(n + 1):
             z = z0 + (z1 - z0) * k / n
             w = half_w(x, z, margin)
+            if w is None or w < 0.05:
+                prev = None
+                continue
             row = (bm.verts.new((x, -w, z)), bm.verts.new((x, w, z)))
             if prev:
                 f = bm.faces.new((prev[0], prev[1], row[1], row[0])); f.material_index = mi
@@ -1420,7 +1574,8 @@ def build_cabin(key, S, st, body, C, full_bvh, lo=False):
 
     step = 0.10 if lo else 0.04
     xs = list(np.arange(C['x_fw'], xb - 1e-6, -step)) + [xb]
-    strip_xy(xs, lambda x: zf, DM['Carpet'])
+    # (the floor follows the underside where it rises toward the ends, and stops where the body does)
+    strip_xy(xs, lambda x: (lambda u: None if u is None else max(zf, u + 0.02))(under(x)), DM['Carpet'])
     z_dash = st_at(st, xc, 'zgb') - 0.015
     wall_yz(C['x_fw'], zf, z_dash - 0.05, DM['Interior'], -1, margin=0.07)
     # ---- dashboard
@@ -1428,7 +1583,7 @@ def build_cabin(key, S, st, body, C, full_bvh, lo=False):
     xd, dx = (x_r + xc) / 2, (xc - x_r) / 2
     z_bot = H.z + 0.16
     zd, dz = (z_dash + z_bot) / 2, (z_dash - z_bot) / 2
-    Wd = half_w(xd, zd, 0.065)
+    Wd = half_w(xd, zd, 0.065) or (Ws - 0.12)
     blob(bm, (xd, 0, zd), (dx, Wd, dz), e=5, nu=32, nv=12, mi=DM['Dash'])
     blob(bm, (H.x + 0.62, H.y, z_dash + 0.02), (0.085, 0.15, 0.045), e=3, nu=20, nv=10, mi=DM['Dash'])            # binnacle
     blob(bm, (H.x + 0.565, H.y, z_dash - 0.005), (0.008, 0.12, 0.036), e=5, nu=16, nv=8, mi=DM['Screen'])          # cluster
@@ -1469,7 +1624,7 @@ def build_cabin(key, S, st, body, C, full_bvh, lo=False):
     blob(bm, (H.x + 0.40, 0, zc_top + 0.10), (0.03, 0.025, 0.022), e=2.5, nu=10, nv=6, mi=DM['Dash'])
     # ---- rear bench
     R_ = C['rear']
-    Wb = min(0.62, well_inner(S) - 0.02, half_w(R_.x, R_.z - 0.1, 0.06))
+    Wb = min(0.62, well_inner(S) - 0.02, half_w(R_.x, R_.z - 0.1, 0.06) or 0.62)
     blob(bm, (R_.x + 0.06, 0, R_.z - 0.17), (0.25, Wb, 0.065), e=3.2, nu=28, nv=10, mi=DM['Seat'],
          rot=Matrix.Rotation(math.radians(-6), 3, 'Y'))
     obox(bm, (R_.x + 0.06, 0, (zf + R_.z - 0.22) / 2), ((1, 0, 0), (0, 1, 0), (0, 0, 1)),
@@ -1657,7 +1812,6 @@ def split_door(key, body, st, items, C):
     hinge = Vector((xmax + 0.003, y_h, 0.0))
     bmesh.ops.dissolve_degenerate(dbm, dist=1e-5, edges=dbm.edges)
     ob = obj_from_bm(dbm, key + '_door')
-    ob['gap_quads'] = len(gap_quads)
     return ob, hinge, gap_quads
 
 
@@ -1683,6 +1837,9 @@ def build_body(key, level, arch_segs):
     smooth.hide_render = True; smooth.name = key + '_smooth'
     full = BVHTree.FromObject(ob, bpy.context.evaluated_depsgraph_get())
     ARCH_SEGS = 64
+    me = ob.data; me.calc_loop_triangles()
+    co = [v.co for v in me.vertices]
+    ob['volume'] = sum(co[t.vertices[0]].dot(co[t.vertices[1]].cross(co[t.vertices[2]])) for t in me.loop_triangles) / 6
     return ob, st, surf, full, smooth
 
 
@@ -1699,7 +1856,7 @@ def build_car(key, wheel_fit):
     wh = wheel_object(S, key + '_wheel')
     # the far model: the cage subdivided once, lighter details and wheels, no door cut
     LOW.update(patch=0.34, blob=0.5, strips_off=True)
-    b1, _, surf1, full1, smooth1 = build_body(key, 1, 24)
+    b1, _, surf1, full1, smooth1 = build_body(key, 1, 32)
     b1.name = key + '_body_lo'
     det1, _ = add_details(key, surf1, S, b1, split_door=False)
     cab1 = build_cabin(key, S, st, b1, C, full1, lo=True)
@@ -1715,7 +1872,7 @@ def build_car(key, wheel_fit):
         w1.append(o)
     LOW.update(patch=1.0, blob=1.0, strips_off=False)
     return dict(S=S, st=st, C=C, body=body, det=det, door=door, hinge=hinge, cab=cab, wheel=wh, surf=surf, gap_quads=gap_quads,
-                lod1=[b1, det1, cab1] + w1)
+                lod1=[b1, det1, cab1] + w1, surf1=surf1, vol=body['volume'], vol1=b1['volume'])
 
 
 # ---------------------------------------------------------------- the game's file
@@ -1827,6 +1984,8 @@ def game_mesh(objs, name, offset=Vector()):
         other.name = name + '_build'
     ob.name = name; ob.data.name = name
     assert ob.name == name, ob.name
+    for k in list(ob.keys()):                         # (the build's own properties stay out of the game's file)
+        del ob[k]
     sc.collection.objects.unlink(ob)
     ob.use_fake_user = True
     return ob
@@ -1847,6 +2006,8 @@ def game_objects(key, car):
     body['door_hinge'] = [round(hg.y, 4), 0.0, round(hg.x, 4)]
     body['door_open'] = round(DOOR_OPEN, 4)
     body['vmax'] = S['vmax']
+    for k in ('mass', 'cog_h', 'drive', 'power_kw', 'torque_nm', 'gears', 'final_drive', 'bump', 'droop'):
+        body[k] = S[k]
     return [body, door, wheel, lod1]
 
 
@@ -1924,20 +2085,19 @@ def check_car(key, car, drivers):
     t2 = S['track'] / 2
     worst, where = 9.0, None
     statics = [car['body'], car['det']]
-    for pitch in (-GAME_PITCH, 0.0, GAME_PITCH):
-        for roll in (-GAME_ROLL, 0.0, GAME_ROLL):
-            bv = bvh_of(statics, pitch=pitch, roll=roll)
+    for bump in (0.0, S['bump']):                     # the wheel at rest and up at its bump stop (the game's suspension)
+            bv = bvh_of(statics)
             for (x, sy, front) in ((xf, 1, True), (xr, 1, False), (xf, -1, True), (xr, -1, False)):
                 for steer in (np.linspace(-STEER, STEER, 9) if front else [0.0]):
                     rs = Matrix.Rotation(steer, 3, 'Z')
                     for p in tyre[::3]:
-                        q = rs @ Vector((p[0], sy * p[1], p[2])) + Vector((x, sy * t2, R))
+                        q = rs @ Vector((p[0], sy * p[1], p[2])) + Vector((x, sy * t2, R + bump))
                         loc, n_, i_, d = bv.find_nearest(q, 0.2)
                         if loc is not None:
                             inside = d < 0.05 and is_inside(bv, q)
                             if (-d if inside else d) < worst:
                                 worst = -d if inside else d
-                                where = dict(axle=round(x, 3), side=sy, steer=round(float(steer), 2), pitch=pitch, roll=roll,
+                                where = dict(axle=round(x, 3), side=sy, steer=round(float(steer), 2), bump=bump,
                                              point=[round(v, 3) for v in q], body=[round(v, 3) for v in loc])
     out['tyre_clearance_min'] = round(worst, 4); out['tyre_clearance_where'] = where
     if worst < 0.015:
@@ -2110,6 +2270,74 @@ def check_car(key, car, drivers):
     if not mirror_ind:
         fails.append('no indicator on the left mirror')
     out['lamps'] = lamps
+    # 7. the outer shell faces out (a positive volume), the details lie just on it, the cabin stays inside it
+    out['volume'] = dict(near=round(car['vol'], 3), far=round(car['vol1'], 3))
+    if car['vol'] <= 0 or car['vol1'] <= 0:
+        fails.append('the body is inside out (volume %s)' % out['volume'])
+    def shell_bvh(objs, door=None):
+        V, F = [], []
+        for o in objs:
+            base = len(V); V += [o.matrix_world @ v.co for v in o.data.vertices]
+            F += [[base + i for i in p.vertices] for p in o.data.polygons]
+        if door is not None:                          # (the door's outer skin and glass: its inside faces the cabin)
+            nm_ = [mname(m) for m in door.data.materials]
+            base = len(V); V += [door.matrix_world @ v.co for v in door.data.vertices]
+            F += [[base + i for i in p.vertices] for p in door.data.polygons if nm_[p.material_index] in ('Paint', 'Glass')]
+        return BVHTree.FromPolygons(V, F)
+    def outside(cab, shell):
+        """Cabin points outside the shell by more than 2 mm (rays both ways along x and down: odd crossings inside);
+        the seals' rims and lips, which are built on the openings' edges, are not counted."""
+        worst, n_out, at = 0.0, 0, None
+        mw = cab.matrix_world
+        nm_ = [mname(m) for m in cab.data.materials]
+        pts = set()
+        for p_ in cab.data.polygons:
+            if nm_[p_.material_index] != 'Trim':
+                pts.update(p_.vertices)
+        for vi in sorted(pts)[::2]:
+            p = mw @ cab.data.vertices[vi].co
+            loc, nrm, i_, d = shell.find_nearest(p, 0.5)
+            if loc is None or d < 0.002:
+                continue
+            votes = 0
+            for dirv in (Vector((0, 0, -1)), Vector((1, 0, 0)), Vector((-1, 0, 0))):
+                n, o = 0, p.copy()
+                for _ in range(60):
+                    hit, nn, ii, dd = shell.ray_cast(o, dirv, 9.0)
+                    if hit is None:
+                        break
+                    n += 1; o = hit + dirv * 1e-5
+                votes += n % 2
+            if votes < 2:
+                n_out += 1
+                if d > worst:
+                    worst, at = d, [round(q, 3) for q in p]
+        return n_out, round(worst, 4), at
+    n1, w1_, a1 = outside(car['cab'], shell_bvh([car['body']], car['door']))
+    b1, det1, cab1 = car['lod1'][:3]
+    n2, w2_, a2 = outside(cab1, shell_bvh([b1]))
+    out['cabin_outside_body'] = dict(near=n1, near_worst=w1_, near_at=a1, far=n2, far_worst=w2_, far_at=a2)
+    if n1 or n2:
+        fails.append('cabin outside the body: %s' % out['cabin_outside_body'])
+    def on_surface(det, surf):
+        att = det.data.attributes.get('kind')
+        if att is None:
+            return None
+        vals = np.zeros(len(det.data.vertices), np.int32); att.data.foreach_get('value', vals)
+        lo_, hi_, bad = 9.0, 0.0, 0
+        for v, k in zip(det.data.vertices, vals):
+            if k != 1:
+                continue
+            loc, nrm, i_, d = surf.bvh.find_nearest(v.co, 0.05)
+            d = 9.0 if loc is None else d
+            lo_, hi_ = min(lo_, d), max(hi_, d)
+            if not (0.0008 <= d <= 0.0065):
+                bad += 1
+        return dict(min=round(lo_, 4), max=round(hi_, 4), off=bad)
+    out['details_on_body'] = dict(near=on_surface(car['det'], car['surf']), far=on_surface(det1, car['surf1']))
+    for k, r in out['details_on_body'].items():
+        if r and r['off']:
+            fails.append('%s details off the body: %s' % (k, r))
     out['wheel_fit'] = dict(centre_from_hip=[round(v, 3) for v in W_['c']], tilt_deg=round(W_['tilt'], 1), radius=W_['r'],
                             fit_err=round(W_['fit_err'], 4))
     out['seat_hip'] = [round(v, 4) for v in H]
@@ -2118,8 +2346,6 @@ def check_car(key, car, drivers):
     return out
 
 
-GAME_ROLL = 0.015           # the game's body roll and pitch limits (index.html carVisuals)
-GAME_PITCH = 0.009
 
 
 # ---------------------------------------------------------------- studio

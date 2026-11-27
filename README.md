@@ -49,7 +49,9 @@ blender -b -P blender/make_cars.py -- city/assets [--only hatch,sedan,suv] [--re
   windscreen, window, pillar...), so glass, paint and black trim follow the window outlines exactly.
 - **The wheel arches** are cut out with cylinders sized to the tyre, with a gap of 4.7–5.5 cm, and the wells are
   deep enough for the tyre at full lock. Around the cuts the panels keep the smooth body's normals.
-- **The details** are drawn onto the body's surface by projection, just above it:
+- **The details** are drawn onto the body's surface by projection, just above it. Lamps, grilles and fog-lamp bezels
+  are meshed along their outlines (their columns run from the outline's bottom to its top), so their edges are
+  smooth curves, and so are the bands inside them (the light strip, the brake bar):
   - headlamps (a dark lens, a light strip, a projector, an amber indicator) and wrap-around tail lamps (tail,
     brake, indicator, reverse);
   - grilles, fog lamps, the bumpers' black parts, recesses for the number plates;
@@ -80,11 +82,15 @@ The script checks every car, and `city/assets/cars_report.json` holds the result
 
 - **Dimensions:** length, width, height, overhangs, wheelbase, track and clearance, against the table, within 1 cm.
 - **Wheels:**
-  - each tyre at least 1.5 cm from the body at every steering angle up to full lock (0.58 rad), with the body
-    rolled and pitched to the game's limits;
+  - each tyre at least 1.5 cm from the body at every steering angle up to full lock (0.58 rad), at rest and pushed
+    up to the suspension's bump stop (2.3, 2.6 and 3.1 cm, the travel the game allows);
   - no tyre sticking out of the body.
 - **The mesh:**
   - no degenerate faces;
+  - the closed body faces outwards (a positive volume);
+  - the details on the body lie 0.8–6.5 mm above it (not sunk in, not floating);
+  - nothing of the cabin, near or far model, sticks out of the body (by an odd number of crossings along three
+    rays from each point);
   - no rays from inside the cabin escaping (with the door's gap counted as sealed).
 - **The door:**
   - its gap is 3–6 mm;
@@ -104,7 +110,41 @@ The script checks every car, and `city/assets/cars_report.json` holds the result
   - The player's car signals by itself in a sharp, slow turn.
 - **The door:** opens and shuts when someone gets in or out.
 - **Seating:** the seat comes from the model.
-- **Body movement:** the body's lean is held within the limits the wheel arches were checked for.
+
+**Physics** (`city/index.html`): a car is a rigid body on four tyres, stepped 120 times a second. The model's extras
+give its mass (1,200, 1,400 and 1,650 kg), its centre of gravity, power and torque, gears and suspension travel.
+
+- **Tyres:**
+  - Each tyre's grip comes from its slip angle (a Pacejka curve) and the load on it, within a friction circle.
+  - The load shifts forward under braking, back under acceleration, and outward in a corner.
+  - A locked wheel slides against its own motion.
+- **Engine and gearbox:**
+  - A torque curve, an automatic six-speed gearbox and a limiter.
+  - The hatchback and sedan drive their front wheels; the crossover all four.
+  - Reverse engages on S once the car has stopped.
+- **Brakes:** shared 65/35 front to rear. The handbrake locks the rear wheels, so the tail slides out.
+- **Measured in the game** (`cg_physics.js`):
+
+  | | 0–100 km/h | Braking from 100 km/h | Cornering | Handbrake slide |
+  |---|---|---|---|---|
+  | Hatchback | 9.8 s | 40 m | 0.94 g | 62° |
+  | Sedan | 9.0 s | 40 m | 0.94 g | 50° |
+  | Crossover | 9.4 s | 40 m | 0.92 g | 55° |
+
+  Standing still, a car stays put.
+- **Suspension (every car):**
+  - Each wheel stands on the ground under it: a curb lifts it 15 cm.
+  - The body rides on springs above the four wheels, and leans under braking, accelerating and cornering.
+  - Each wheel's travel from the body is held within the model's bump (checked against its arches) and droop.
+- **Collisions:**
+  - Cars are boxes; buildings are boxes and posts are circles.
+  - A hit gives both sides an impulse at the contact point, with friction, so a car hit off its centre spins.
+    Momentum is kept (96% in the test, a sedan into a parked hatchback at 30 km/h).
+  - At 40 m/s a car still stops at a wall (steps of 37 cm, less than its width).
+  - A traffic car stops for a moment when it is nudged, and becomes a free body when it is really hit.
+  - A parked car that is hit slides on its locked wheels.
+- **Feedback:** the tyres leave marks on the road and squeal when they slide, and the engine's sound follows its
+  revolutions. The speedometer shows the gear.
 
 ## Dressed character (`characters/`)
 

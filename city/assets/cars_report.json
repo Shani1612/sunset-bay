@@ -10,22 +10,21 @@
    "track": 1.52,
    "clearance": 0.16
   },
-  "tyre_clearance_min": 0.017,
+  "tyre_clearance_min": 0.0171,
   "tyre_clearance_where": {
    "axle": 1.225,
    "side": 1,
    "steer": -0.58,
-   "pitch": 0.009,
-   "roll": -0.015,
+   "bump": 0.023,
    "point": [
     1.118,
     0.744,
-    0.61
+    0.633
    ],
    "body": [
     1.113,
     0.744,
-    0.626
+    0.649
    ]
   },
   "tyre_outer_vs_body": -0.0146,
@@ -35,100 +34,100 @@
     "degenerate": 0
    },
    "hatch_details": {
-    "faces": 9145,
+    "faces": 6983,
     "degenerate": 0
    },
    "hatch_cabin": {
-    "faces": 7675,
+    "faces": 7551,
     "degenerate": 0
    },
    "hatch_door": {
-    "faces": 1689,
+    "faces": 1685,
     "degenerate": 0
    }
   },
   "cabin_rays_missing": 0,
   "door_gap": {
-   "p2": 0.004,
+   "p2": 0.0027,
    "median": 0.0044
   },
   "door_gap_smallest": [
    {
-    "gap": 0.0039,
+    "gap": 0.0027,
     "at": [
-     0.656,
-     0.751,
-     1.108
+     0.944,
+     0.869,
+     0.595
     ],
     "body": [
-     0.6575,
-     0.7483,
-     1.1109
+     0.944,
+     0.8692,
+     0.5924
+    ]
+   },
+   {
+    "gap": 0.0027,
+    "at": [
+     0.944,
+     0.869,
+     0.595
+    ],
+    "body": [
+     0.944,
+     0.8692,
+     0.5924
+    ]
+   },
+   {
+    "gap": 0.0032,
+    "at": [
+     0.944,
+     0.872,
+     0.595
+    ],
+    "body": [
+     0.9439,
+     0.8692,
+     0.5924
+    ]
+   },
+   {
+    "gap": 0.0038,
+    "at": [
+     0.859,
+     0.767,
+     1.029
+    ],
+    "body": [
+     0.8598,
+     0.764,
+     1.032
     ]
    },
    {
     "gap": 0.004,
     "at": [
-     0.947,
-     0.767,
-     0.998
+     0.442,
+     0.727,
+     1.198
     ],
     "body": [
-     0.9479,
-     0.7638,
-     1.0008
-    ]
-   },
-   {
-    "gap": 0.0041,
-    "at": [
-     0.223,
-     0.706,
-     1.282
-    ],
-    "body": [
-     0.2246,
-     0.7035,
-     1.2855
+     0.443,
+     0.7244,
+     1.2011
     ]
    },
    {
     "gap": 0.0042,
     "at": [
-     -0.212,
-     0.63,
-     1.407
+     0.917,
+     0.867,
+     0.518
     ],
     "body": [
-     -0.2119,
-     0.6265,
-     1.4086
-    ]
-   },
-   {
-    "gap": 0.0042,
-    "at": [
-     -0.293,
-     0.63,
-     1.411
-    ],
-    "body": [
-     -0.2933,
-     0.6261,
-     1.4124
-    ]
-   },
-   {
-    "gap": 0.0042,
-    "at": [
-     0.109,
-     0.637,
-     1.363
-    ],
-    "body": [
-     0.1099,
-     0.6333,
-     1.3648
+     0.9204,
+     0.8668,
+     0.5159
     ]
    }
   ],
@@ -210,46 +209,70 @@
   "mirror_indicator_left": 72,
   "lamps": {
    "DRL": {
-    "faces": 164,
-    "front": 164,
+    "faces": 128,
+    "front": 128,
     "rear": 0,
-    "left": 82,
-    "right": 82
+    "left": 64,
+    "right": 64
    },
    "Tail": {
-    "faces": 1404,
+    "faces": 560,
     "front": 0,
-    "rear": 1404,
-    "left": 702,
-    "right": 702
+    "rear": 560,
+    "left": 280,
+    "right": 280
    },
    "Brake": {
-    "faces": 664,
+    "faces": 240,
     "front": 0,
-    "rear": 664,
-    "left": 332,
-    "right": 332
+    "rear": 240,
+    "left": 120,
+    "right": 120
    },
    "IndL": {
-    "faces": 249,
-    "front": 151,
-    "rear": 98,
-    "left": 249,
+    "faces": 196,
+    "front": 168,
+    "rear": 28,
+    "left": 196,
     "right": 0
    },
    "IndR": {
-    "faces": 249,
-    "front": 151,
-    "rear": 98,
+    "faces": 196,
+    "front": 168,
+    "rear": 28,
     "left": 0,
-    "right": 249
+    "right": 196
    },
    "Reverse": {
-    "faces": 184,
+    "faces": 104,
     "front": 0,
-    "rear": 184,
-    "left": 92,
-    "right": 92
+    "rear": 104,
+    "left": 52,
+    "right": 52
+   }
+  },
+  "volume": {
+   "near": 6.278,
+   "far": 6.268
+  },
+  "cabin_outside_body": {
+   "near": 0,
+   "near_worst": 0.0,
+   "near_at": null,
+   "far": 0,
+   "far_worst": 0.0,
+   "far_at": null
+  },
+  "details_on_body": {
+   "near": {
+    "min": 0.0012,
+    "max": 0.004,
+    "off": 0
+   },
+   "far": {
+    "min": 0.0015,
+    "max": 0.004,
+    "off": 0
    }
   },
   "wheel_fit": {
@@ -271,7 +294,7 @@
   "ok": true,
   "game_triangles": {
    "hatch_body": {
-    "triangles": 44128,
+    "triangles": 39359,
     "materials": [
      "Glass",
      "Lamps",
@@ -281,7 +304,7 @@
     ]
    },
    "hatch_door": {
-    "triangles": 3151,
+    "triangles": 3143,
     "materials": [
      "Glass",
      "Lamps",
@@ -296,7 +319,7 @@
     ]
    },
    "hatch_lod1": {
-    "triangles": 11542,
+    "triangles": 11088,
     "materials": [
      "Glass",
      "Lamps",
@@ -318,22 +341,21 @@
    "track": 1.56,
    "clearance": 0.16
   },
-  "tyre_clearance_min": 0.0175,
+  "tyre_clearance_min": 0.0166,
   "tyre_clearance_where": {
    "axle": 1.405,
    "side": 1,
-   "steer": 0.58,
-   "pitch": 0.009,
-   "roll": -0.015,
+   "steer": -0.58,
+   "bump": 0.026,
    "point": [
-    1.262,
-    0.777,
-    0.608
+    1.295,
+    0.761,
+    0.647
    ],
    "body": [
-    1.255,
-    0.777,
-    0.624
+    1.289,
+    0.761,
+    0.663
    ]
   },
   "tyre_outer_vs_body": -0.0144,
@@ -343,100 +365,100 @@
     "degenerate": 0
    },
    "sedan_details": {
-    "faces": 8944,
+    "faces": 6786,
     "degenerate": 0
    },
    "sedan_cabin": {
-    "faces": 7959,
+    "faces": 7834,
     "degenerate": 0
    },
    "sedan_door": {
-    "faces": 1677,
+    "faces": 1673,
     "degenerate": 0
    }
   },
   "cabin_rays_missing": 0,
   "door_gap": {
-   "p2": 0.004,
+   "p2": 0.0038,
    "median": 0.0044
   },
   "door_gap_smallest": [
    {
-    "gap": 0.0039,
-    "at": [
-     0.73,
-     0.772,
-     1.09
-    ],
-    "body": [
-     0.7317,
-     0.7697,
-     1.0927
-    ]
-   },
-   {
-    "gap": 0.004,
-    "at": [
-     1.042,
-     0.787,
-     0.978
-    ],
-    "body": [
-     1.0428,
-     0.7844,
-     0.9808
-    ]
-   },
-   {
-    "gap": 0.0041,
-    "at": [
-     0.407,
-     0.737,
-     1.235
-    ],
-    "body": [
-     0.4088,
-     0.7351,
-     1.238
-    ]
-   },
-   {
-    "gap": 0.0042,
-    "at": [
-     0.061,
-     0.655,
-     1.392
-    ],
-    "body": [
-     0.0611,
-     0.6512,
-     1.3937
-    ]
-   },
-   {
-    "gap": 0.0042,
-    "at": [
-     -0.058,
-     0.652,
-     1.405
-    ],
-    "body": [
-     -0.0581,
-     0.6486,
-     1.4067
-    ]
-   },
-   {
-    "gap": 0.0042,
+    "gap": 0.0037,
     "at": [
      -0.378,
      0.65,
-     1.413
+     1.415
     ],
     "body": [
      -0.3778,
      0.6459,
      1.4145
+    ]
+   },
+   {
+    "gap": 0.0038,
+    "at": [
+     0.943,
+     0.787,
+     1.009
+    ],
+    "body": [
+     0.9436,
+     0.7848,
+     1.0121
+    ]
+   },
+   {
+    "gap": 0.0042,
+    "at": [
+     0.179,
+     0.659,
+     1.368
+    ],
+    "body": [
+     0.1799,
+     0.6554,
+     1.3701
+    ]
+   },
+   {
+    "gap": 0.0042,
+    "at": [
+     0.179,
+     0.659,
+     1.368
+    ],
+    "body": [
+     0.1799,
+     0.6554,
+     1.3701
+    ]
+   },
+   {
+    "gap": 0.0042,
+    "at": [
+     -0.167,
+     0.651,
+     1.411
+    ],
+    "body": [
+     -0.1668,
+     0.6472,
+     1.4124
+    ]
+   },
+   {
+    "gap": 0.0044,
+    "at": [
+     1.058,
+     0.817,
+     0.945
+    ],
+    "body": [
+     1.0581,
+     0.8133,
+     0.9473
     ]
    }
   ],
@@ -518,46 +540,70 @@
   "mirror_indicator_left": 56,
   "lamps": {
    "DRL": {
-    "faces": 176,
-    "front": 176,
+    "faces": 132,
+    "front": 132,
     "rear": 0,
-    "left": 88,
-    "right": 88
+    "left": 66,
+    "right": 66
    },
    "Tail": {
-    "faces": 1568,
+    "faces": 554,
     "front": 0,
-    "rear": 1568,
-    "left": 784,
-    "right": 784
+    "rear": 554,
+    "left": 277,
+    "right": 277
    },
    "Brake": {
-    "faces": 532,
+    "faces": 246,
     "front": 0,
-    "rear": 532,
-    "left": 266,
-    "right": 266
+    "rear": 246,
+    "left": 123,
+    "right": 123
    },
    "IndL": {
-    "faces": 230,
-    "front": 141,
-    "rear": 89,
-    "left": 230,
+    "faces": 188,
+    "front": 160,
+    "rear": 28,
+    "left": 188,
     "right": 0
    },
    "IndR": {
-    "faces": 230,
-    "front": 141,
-    "rear": 89,
+    "faces": 188,
+    "front": 160,
+    "rear": 28,
     "left": 0,
-    "right": 230
+    "right": 188
    },
    "Reverse": {
-    "faces": 164,
+    "faces": 104,
     "front": 0,
-    "rear": 164,
-    "left": 82,
-    "right": 82
+    "rear": 104,
+    "left": 52,
+    "right": 52
+   }
+  },
+  "volume": {
+   "near": 6.987,
+   "far": 6.979
+  },
+  "cabin_outside_body": {
+   "near": 0,
+   "near_worst": 0.0,
+   "near_at": null,
+   "far": 0,
+   "far_worst": 0.0,
+   "far_at": null
+  },
+  "details_on_body": {
+   "near": {
+    "min": 0.0012,
+    "max": 0.004,
+    "off": 0
+   },
+   "far": {
+    "min": 0.0015,
+    "max": 0.004,
+    "off": 0
    }
   },
   "wheel_fit": {
@@ -579,7 +625,7 @@
   "ok": true,
   "game_triangles": {
    "sedan_body": {
-    "triangles": 44379,
+    "triangles": 39608,
     "materials": [
      "Glass",
      "Lamps",
@@ -589,7 +635,7 @@
     ]
    },
    "sedan_door": {
-    "triangles": 3139,
+    "triangles": 3131,
     "materials": [
      "Glass",
      "Lamps",
@@ -604,7 +650,7 @@
     ]
    },
    "sedan_lod1": {
-    "triangles": 11772,
+    "triangles": 11300,
     "materials": [
      "Glass",
      "Lamps",
@@ -619,29 +665,28 @@
   "dimensions": {
    "length": 4.5063,
    "width": 1.8569,
-   "height": 1.6665,
+   "height": 1.6666,
    "front_overhang": 0.9239,
    "rear_overhang": 0.9024,
    "wheelbase": 2.68,
    "track": 1.6,
    "clearance": 0.2
   },
-  "tyre_clearance_min": 0.022,
+  "tyre_clearance_min": 0.0161,
   "tyre_clearance_where": {
    "axle": 1.33,
    "side": 1,
-   "steer": 0.58,
-   "pitch": 0.009,
-   "roll": -0.015,
+   "steer": -0.58,
+   "bump": 0.031,
    "point": [
-    1.172,
-    0.796,
-    0.675
+    1.208,
+    0.78,
+    0.721
    ],
    "body": [
-    1.163,
-    0.796,
-    0.695
+    1.203,
+    0.78,
+    0.736
    ]
   },
   "tyre_outer_vs_body": -0.0141,
@@ -651,21 +696,21 @@
     "degenerate": 0
    },
    "suv_details": {
-    "faces": 12823,
+    "faces": 8869,
     "degenerate": 0
    },
    "suv_cabin": {
-    "faces": 7809,
+    "faces": 7785,
     "degenerate": 0
    },
    "suv_door": {
-    "faces": 1704,
+    "faces": 1700,
     "degenerate": 0
    }
   },
   "cabin_rays_missing": 0,
   "door_gap": {
-   "p2": 0.0036,
+   "p2": 0.0038,
    "median": 0.0044
   },
   "door_gap_smallest": [
@@ -683,29 +728,29 @@
     ]
    },
    {
-    "gap": 0.0038,
+    "gap": 0.0039,
     "at": [
-     0.857,
-     0.809,
-     1.221
+     0.662,
+     0.792,
+     1.315
     ],
     "body": [
-     0.8581,
-     0.807,
-     1.2232
+     0.664,
+     0.7894,
+     1.3179
     ]
    },
    {
-    "gap": 0.0041,
+    "gap": 0.004,
     "at": [
-     -0.29,
-     0.7,
-     1.597
+     0.465,
+     0.774,
+     1.417
     ],
     "body": [
-     -0.2895,
-     0.6959,
-     1.5991
+     0.467,
+     0.7715,
+     1.42
     ]
    },
    {
@@ -826,46 +871,70 @@
   "mirror_indicator_left": 68,
   "lamps": {
    "DRL": {
-    "faces": 138,
-    "front": 138,
+    "faces": 128,
+    "front": 128,
     "rear": 0,
-    "left": 69,
-    "right": 69
+    "left": 64,
+    "right": 64
    },
    "Tail": {
-    "faces": 1570,
+    "faces": 560,
     "front": 0,
-    "rear": 1570,
-    "left": 785,
-    "right": 785
+    "rear": 560,
+    "left": 280,
+    "right": 280
    },
    "Brake": {
-    "faces": 530,
+    "faces": 240,
     "front": 0,
-    "rear": 530,
-    "left": 265,
-    "right": 265
+    "rear": 240,
+    "left": 120,
+    "right": 120
    },
    "IndL": {
-    "faces": 248,
-    "front": 150,
-    "rear": 98,
-    "left": 248,
+    "faces": 196,
+    "front": 168,
+    "rear": 28,
+    "left": 196,
     "right": 0
    },
    "IndR": {
-    "faces": 248,
-    "front": 150,
-    "rear": 98,
+    "faces": 196,
+    "front": 168,
+    "rear": 28,
     "left": 0,
-    "right": 248
+    "right": 196
    },
    "Reverse": {
-    "faces": 186,
+    "faces": 104,
     "front": 0,
-    "rear": 186,
-    "left": 93,
-    "right": 93
+    "rear": 104,
+    "left": 52,
+    "right": 52
+   }
+  },
+  "volume": {
+   "near": 8.466,
+   "far": 8.454
+  },
+  "cabin_outside_body": {
+   "near": 0,
+   "near_worst": 0.0,
+   "near_at": null,
+   "far": 0,
+   "far_worst": 0.0,
+   "far_at": null
+  },
+  "details_on_body": {
+   "near": {
+    "min": 0.0012,
+    "max": 0.0045,
+    "off": 0
+   },
+   "far": {
+    "min": 0.0015,
+    "max": 0.0045,
+    "off": 0
    }
   },
   "wheel_fit": {
@@ -887,7 +956,7 @@
   "ok": true,
   "game_triangles": {
    "suv_body": {
-    "triangles": 51346,
+    "triangles": 44124,
     "materials": [
      "Glass",
      "Lamps",
@@ -897,7 +966,7 @@
     ]
    },
    "suv_door": {
-    "triangles": 3188,
+    "triangles": 3180,
     "materials": [
      "Glass",
      "Lamps",
@@ -912,7 +981,7 @@
     ]
    },
    "suv_lod1": {
-    "triangles": 13848,
+    "triangles": 12276,
     "materials": [
      "Glass",
      "Lamps",
