@@ -146,6 +146,20 @@ give its mass (1,200, 1,400 and 1,650 kg), its centre of gravity, power and torq
 - **Feedback:** the tyres leave marks on the road and squeal when they slide, and the engine's sound follows its
   revolutions. The speedometer shows the gear.
 
+**Crash damage** (`city/index.html`): a car is damaged where it is hit, and only there.
+- **The hit:** cars take a dent and sparks fly from about 8 km/h. The dent's depth grows with the square of the
+  speed, up to 42 cm; its size grows with the speed.
+- **The dent:** the panels around the point of contact are pushed in along the hit. They ripple as they crumple,
+  and a hood or a boot lid buckles up. No point moves more than 50 cm from where it was.
+- **Glass and lamps:** windows in the zone shatter into shards, and lamps there go dark.
+- **Pieces breaking off:** in a hard hit, bits of bumper, grille and lamp come off, and so does the bumper's cover
+  low down. They fall as bodies of their own: they bounce, tumble and stay on the road.
+- **Wheels:** a wheel near the hit is knocked out of line (toe and camber), and the car pulls to that side.
+- **Engine:** a heavy hit at the front costs the engine power, and it steams.
+- **Shake:** the camera shakes with the player's crash.
+- **Repair:** R, or the 🔧 button while the car is damaged.
+- **Both models:** the near and the far model take the same damage, and only the hit car's geometry is copied.
+
 ## Dressed character (`characters/`)
 
 `characters/Human.glb` is an MB-Lab character. `blender/dress_character.py`
