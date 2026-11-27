@@ -17,6 +17,15 @@ writes a .blend and a .glb.
 
 Run with Blender 4.2+ (or the bpy module):
     blender -b -P blender/dress_character.py -- characters/Human.glb characters
+    blender -b -P blender/dress_character.py -- <npc>.glb <outdir> [style.json]
+
+Any MB-Lab character can be dressed (a woman or a man, of any build): the
+pipeline's measures were made on characters/Human.glb, so a character of other
+proportions is first mapped onto Human.glb's (heights, widths and depth
+centres matched at the skeleton's landmarks, by a smooth map), dressed there,
+and the clothes are mapped back onto the real body and checked there. For
+Human.glb itself the map is the identity. style.json may give the iris colour
+("iris": [r, g, b], linear).
 """
 import bpy, bmesh, math, os, sys, json
 from collections import defaultdict
@@ -24,10 +33,14 @@ import numpy as np
 from mathutils import Vector, Matrix
 from mathutils.bvhtree import BVHTree
 from mathutils.kdtree import KDTree
+from mathutils import geometry
 
 ARGS = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
 SRC = os.path.abspath(ARGS[0] if ARGS else 'characters/Human.glb')
 OUT = os.path.abspath(ARGS[1] if len(ARGS) > 1 else 'characters')
+STYLE = json.load(open(ARGS[2])) if len(ARGS) > 2 else {}
+FIT_FROM = os.path.abspath(STYLE['fit']) if STYLE.get('fit') else None      # a dressed reference .blend
+NAME = os.path.splitext(os.path.basename(SRC))[0].lower()      # Human.glb -> human_dressed.*
 os.makedirs(OUT, exist_ok=True)
 REPORT = {}
 
@@ -47,22 +60,25 @@ bpy.ops.import_scene.gltf(filepath=SRC)
 for o in list(bpy.data.objects):
     if o.name.startswith('Icosphere'):          # the glTF importer's bone-display shape
         bpy.data.objects.remove(o)
-body = bpy.data.objects['m_ca01']
-arm = bpy.data.objects['m_ca01_skeleton']
+arm = next(o for o in bpy.data.objects if o.type == 'ARMATURE')
+body = next(o for o in bpy.data.objects if o.type == 'MESH' and o.parent == arm
+            and any(m and m.name == 'MBLab_skin3' for m in o.data.materials))
 scene = bpy.context.scene
 me = body.data
 
 # the glTF import left the skin untextured (its albedo was wired to the tongue
-# only) and the cornea opaque: restore both
-alb = bpy.data.images.get('human_male_albedo')
+# only) and the cornea opaque: restore both (a character from
+# make_npc_bodies.py already has its skin texture)
+alb = bpy.data.images.get('human_male_albedo') or bpy.data.images.get('human_female_albedo')
 for m in me.materials:
     nt = m.node_tree
     b = nt.nodes.get('Principled BSDF')
     if b is None:
         continue
-    if m.name == 'MBLab_skin3' and alb is not None:
-        t = nt.nodes.new('ShaderNodeTexImage'); t.image = alb
-        nt.links.new(t.outputs['Color'], b.inputs['Base Color'])
+    if m.name == 'MBLab_skin3' and (alb is not None or b.inputs['Base Color'].is_linked):
+        if not b.inputs['Base Color'].is_linked:
+            t = nt.nodes.new('ShaderNodeTexImage'); t.image = alb
+            nt.links.new(t.outputs['Color'], b.inputs['Base Color'])
         b.inputs['Roughness'].default_value = 0.5
         b.inputs['Subsurface Weight'].default_value = 0.15
         b.inputs['Subsurface Radius'].default_value = (1.0, 0.35, 0.2)
@@ -73,12 +89,16 @@ for m in me.materials:
         b.inputs['Metallic'].default_value = 0.0; b.inputs['Roughness'].default_value = 0.9
         b.inputs['Base Color'].default_value = (0.75, 0.75, 0.74, 1)
     if m.name == 'MBlab_cornea':                              # a clear, glossy film over the eye
+        m.surface_render_method = 'BLENDED'
         b.inputs['Metallic'].default_value = 0.0; b.inputs['Transmission Weight'].default_value = 0.0
         b.inputs['IOR'].default_value = 1.376; b.inputs['Alpha'].default_value = 0.12
         b.inputs['Roughness'].default_value = 0.02; b.inputs['Specular IOR Level'].default_value = 1.0
         b.inputs['Base Color'].default_value = (1, 1, 1, 1)
     if m.name == 'MBLab_Iris_V4':
-        b.inputs['Base Color'].default_value = (0.16, 0.085, 0.035, 1); b.inputs['Roughness'].default_value = 0.3
+        if b.inputs['Base Color'].is_linked:                  # (a plain colour: the iris texture's UVs don't survive)
+            nt.links.remove(b.inputs['Base Color'].links[0])
+        b.inputs['Base Color'].default_value = tuple(STYLE.get('iris', (0.16, 0.085, 0.035))) + (1,)
+        b.inputs['Roughness'].default_value = 0.3
     if m.name == 'MBLab_nails':                               # exported dark red: a natural nail
         b.inputs['Base Color'].default_value = (0.62, 0.43, 0.40, 1); b.inputs['Roughness'].default_value = 0.35
     if m.name == 'MBlab_pupil':
@@ -95,7 +115,16 @@ W = np.zeros((NV, len(GN)), np.float32)
 for v in me.vertices:
     for g in v.groups:
         W[v.index, g.group] = g.weight
-skin_polys = [p for p in me.polygons if p.material_index in SKINS]
+class _Poly:
+    """A face's vertex indices (plain data: references into the mesh would go
+    stale once its coordinates are rewritten)."""
+    __slots__ = ('vertices',)
+
+    def __init__(self, p):
+        self.vertices = tuple(p.vertices)
+
+
+skin_polys = [_Poly(p) for p in me.polygons if p.material_index in SKINS]
 SKINV = np.zeros(NV, bool)
 for p in skin_polys:
     SKINV[list(p.vertices)] = True
@@ -119,6 +148,89 @@ HEADW = W[:, G_HEAD].sum(1)
 SIDE = {'L': 1.0, 'R': -1.0}
 
 BONE = {b.name: (Vector(b.head_local), Vector(b.tail_local)) for b in arm.data.bones}
+
+
+# ---------------------------------------------------------------- landmarks of the body
+# The measures below (hem heights, the neckline...) were set on
+# characters/Human.glb. Another character (make_npc_bodies.py) is dressed by
+# fitting Human.glb's finished clothes onto it (see fit_clothes); the few
+# heights that step needs are carried over by the skeleton's landmarks (foot,
+# ankle, knee, hip joint, chest, shoulder joint, head, crown; MB-Lab's female
+# and male rigs place the waist and neck joints differently, so those aren't
+# used).
+def body_landmarks():
+    def lr(n, k):
+        a, b = BONE[n + '_L'][k], BONE[n + '_R'][k]
+        return (a + b) / 2, (abs(a.x) + abs(b.x)) / 2
+    torso = SKINV & (ARMW < 0.05) & (LEGW['L'] < 0.5) & (LEGW['R'] < 0.5)
+    legs = SKINV & ((LEGW['L'] > 0.5) | (LEGW['R'] > 0.5))
+    head = SKINV & (HEADW > 0.5)
+    def band(sel, z, w=0.012):
+        return sel & (np.abs(CO[:, 2] - z) < w)
+    def half_w(sel, z):
+        return float(np.abs(CO[band(sel, z), 0]).max())
+    def y_mid(sel, z):
+        y = CO[band(sel, z), 1]
+        return float((y.min() + y.max()) / 2)
+    ank, ankx = lr('calf', 1); kn, knx = lr('calf', 0); hip, hipx = lr('thigh', 0); sh, shx = lr('upperarm', 0)
+    ch, hd = (BONE[n][0].z for n in ('spine03', 'head'))
+    hz = hd + 0.06                                               # the cranium
+    return dict(
+        Z=[float(CO[SKINV, 2].min()), ank.z, kn.z, hip.z, ch, sh.z, hd, float(CO[SKINV, 2].max())],
+        XZ=[ank.z, kn.z, hip.z, ch, sh.z, hz],
+        X=[ankx, knx, hipx, half_w(torso, ch), shx, half_w(head, hz)],
+        Y=[y_mid(legs, ank.z + 0.02), y_mid(legs, kn.z), y_mid(legs, hip.z - 0.05), y_mid(torso, ch),
+           y_mid(torso, sh.z - 0.03), y_mid(head, hz)])
+
+
+# measured on characters/Human.glb by body_landmarks() (its log line 'landmarks')
+REF_LM = {
+    'Z': [-0.0029, 0.104, 0.5324, 0.9902, 1.3101, 1.4784, 1.6519, 1.8303],
+    'XZ': [0.104, 0.5324, 0.9902, 1.3101, 1.4784, 1.7119],
+    'X': [0.1911, 0.1533, 0.1165, 0.165, 0.1812, 0.0897],
+    'Y': [0.0127, -0.0073, -0.0479, -0.0277, -0.0115, -0.0562],
+}
+
+
+def pchip(xk, yk, extrapolate=True):
+    """A monotone piecewise-cubic (Fritsch-Carlson) through the knots: no
+    overshoot between them; linear (or flat) beyond the ends."""
+    xk = np.asarray(xk, float); yk = np.asarray(yk, float)
+    h = np.diff(xk); d = np.diff(yk) / h
+    m = np.zeros(len(xk))
+    for i in range(1, len(xk) - 1):
+        if d[i - 1] * d[i] > 0:
+            w1, w2 = 2 * h[i] + h[i - 1], h[i] + 2 * h[i - 1]
+            m[i] = (w1 + w2) / (w1 / d[i - 1] + w2 / d[i])
+    m[0], m[-1] = (d[0], d[-1]) if extrapolate else (0.0, 0.0)
+    def f(x):
+        x = np.asarray(x, float)
+        i = np.clip(np.searchsorted(xk, x) - 1, 0, len(h) - 1)
+        t = np.clip((x - xk[i]) / h[i], 0, 1)
+        t2, t3 = t * t, t * t * t
+        y = ((2 * t3 - 3 * t2 + 1) * yk[i] + (t3 - 2 * t2 + t) * h[i] * m[i]
+             + (-2 * t3 + 3 * t2) * yk[i + 1] + (t3 - t2) * h[i] * m[i + 1])
+        lo, hi = x < xk[0], x > xk[-1]
+        y = np.where(lo, yk[0] + m[0] * (x - xk[0]), y)
+        return np.where(hi, yk[-1] + m[-1] * (x - xk[-1]), y)
+    return f
+
+
+LM = body_landmarks()
+REPORT['landmarks'] = {k: [round(float(x), 4) for x in v] for k, v in LM.items()}
+log('landmarks', json.dumps(REPORT['landmarks']))
+ZN = pchip(REF_LM['Z'], LM['Z'])            # a height on Human.glb -> the same place on this body
+
+
+def count_folds(ob):
+    """Edges whose two faces turn more than ~100 degrees (as the fold check counts)."""
+    bm = bmesh.new(); bm.from_mesh(ob.data); bm.normal_update()
+    n = sum(1 for e in bm.edges if len(e.link_faces) == 2 and min(f.calc_area() for f in e.link_faces) > 1e-9
+            and e.link_faces[0].normal.dot(e.link_faces[1].normal) < -0.2)
+    bm.free()
+    return n
+
+
 BODY_BVH = BVHTree.FromPolygons([Vector(c) for c in CO], [tuple(p.vertices) for p in skin_polys])
 _bmn = bmesh.new(); _bmn.from_mesh(me); _bmn.verts.ensure_lookup_table(); _bmn.normal_update()
 BNRM = np.array([v.normal[:] for v in _bmn.verts]); _bmn.free()
@@ -869,6 +981,7 @@ def make_sole(s):
         f.smooth = True
     top.smooth = False
     ob = to_object('Sole_' + s, bm); bm.free()
+    set_attr(ob.data, 'rest', np.array([v.co[:] for v in ob.data.vertices]))
     SHOE_PARTS[s]['sole'] = ob
     # the rim must stay outside the upper
     ubvh = BVHTree.FromObject(up, bpy.context.evaluated_depsgraph_get())
@@ -1441,6 +1554,24 @@ def build_mask():
         n = int(np.sum(inside & (CO[:, 2] < rim_z) & SKINV & ~covered))
         covered |= inside & (CO[:, 2] < rim_z) & SKINV
         log('mask: inside sole', sd, n, 'more body verts')
+    # a fitted shoe encloses the foot up to its collar: the skin inside it (a ray
+    # up from it meets the shoe from inside) is hidden as well
+    if FIT_FROM is not None:
+        for sd in 'LR':
+            vs, fs = [], []                                    # the upper (without its thickness), laces, pad
+            for k in ('upper', 'laces', 'pad'):
+                um = SHOE_PARTS[sd][k].data; o_ = len(vs)
+                vs += [v.co.copy() for v in um.vertices]; fs += [tuple(o_ + i for i in f.vertices) for f in um.polygons]
+            up = BVHTree.FromPolygons(vs, fs)
+            R = np.array([v.co[:] for v in SHOE_PARTS[sd]['sole'].data.vertices])
+            hull = convex_hull_2d(R[:, :2])
+            cand = np.where(SKINV & ~covered & (sdf_poly(CO[:, :2], hull) < 0) & (CO[:, 2] < 0.25))[0]
+            n = 0
+            for i in cand:
+                hit = up.ray_cast(Vector(CO[i]), Vector((0, 0, 1)), 0.2)
+                if hit[0] is not None:
+                    covered[i] = True; n += 1
+            log('mask: inside the fitted shoe', sd, n, 'more body verts')
     # glTF splits vertices along UV seams: the copies must agree
     key = defaultdict(list)
     for i, c in enumerate(np.round(CO, 6)):
@@ -1492,6 +1623,57 @@ def evaluated(ob):
     return P.reshape(-1, 3)
 
 
+SKIN_REL = {}            # garment -> (faces, under, patch, edge, boundary edges per face), set by the rest check
+
+
+def vertex_normals(P, polys):
+    """Smooth (area-weighted) vertex normals of a mesh posed at P."""
+    N = np.zeros_like(P)
+    for f in polys:
+        for j in range(1, len(f) - 1):
+            c = np.cross(P[f[j]] - P[f[0]], P[f[j + 1]] - P[f[0]])
+            N[f[0]] += c; N[f[j]] += c; N[f[j + 1]] += c
+    return N / np.maximum(np.linalg.norm(N, axis=1), 1e-12)[:, None]
+
+
+def smooth_normal(P, VN, poly, loc):
+    """The vertex normals interpolated at loc on the face (steady across a
+    crease, where the nearest face, and its normal, can flip)."""
+    V = [Vector(P[v]) for v in poly]
+    for j in range(1, len(V) - 1):
+        a, b, c = V[0], V[j], V[j + 1]
+        w = geometry.barycentric_transform(loc, a, b, c, Vector((1, 0, 0)), Vector((0, 1, 0)), Vector((0, 0, 1)))
+        if min(w) > -1e-3:
+            n = Vector(VN[poly[0]]) * w[0] + Vector(VN[poly[j]]) * w[1] + Vector(VN[poly[j + 1]]) * w[2]
+            return n.normalized()
+    return Vector(np.mean([VN[v] for v in poly], axis=0)).normalized()
+
+
+def on_boundary(P, edges, loc, tol=2e-5):
+    """Is loc on one of these boundary edges (the nearest point of the cloth is
+    its edge: the point lies beyond the cloth, not over or under it)?"""
+    for a, b in edges:
+        A, B = Vector(P[a]), Vector(P[b]); ab = B - A
+        t = max(0.0, min(1.0, (loc - A).dot(ab) / max(ab.length_squared, 1e-18)))
+        if (A + ab * t - loc).length < tol:
+            return True
+    return False
+
+
+def patch_nearest(P, polys, idxs, co):
+    """The nearest point of the faces polys[j], j in idxs: (point, normal, distance)."""
+    best = None
+    for j in idxs:
+        V = [Vector(P[v]) for v in polys[j]]
+        n = geometry.normal(V)
+        for a in range(1, len(V) - 1):
+            cp = geometry.closest_point_on_tri(co, V[0], V[a], V[a + 1])
+            d = (co - cp).length
+            if best is None or d < best[2]:
+                best = (cp, n, d)
+    return best
+
+
 def check(tag, covered):
     """Count every place where something shows through a garment."""
     bad = {}
@@ -1500,6 +1682,8 @@ def check(tag, covered):
     vis_f = [p for p in skin_polys if not covered[list(p.vertices)].any()]
     pts = np.vstack([Pb[vis_v], np.array([Pb[list(p.vertices)].mean(0) for p in vis_f])])
     rest = np.vstack([CO[vis_v], np.array([CO[list(p.vertices)].mean(0) for p in vis_f])])
+    rest_n = np.vstack([BNRM[vis_v], np.array([BNRM[list(p.vertices)].mean(0) for p in vis_f])])
+    rest_n /= np.maximum(np.linalg.norm(rest_n, axis=1), 1e-9)[:, None]
     surf = {}
     for name, G in GARMENTS.items():
         P = evaluated(G['ob']); polys, bnd = mesh_topology(G['ob'])
@@ -1524,21 +1708,69 @@ def check(tag, covered):
             where.extend(at[:4])
         return n, worst
 
-    def through_body(bvh, need):
+    if not SKIN_REL:
+        # in the rest pose: which visible skin is under each garment, and the
+        # patch of that garment over it (its faces within 3 cm); skin near a
+        # garment's edge that is not under it is "beside" the edge
+        for name, G in GARMENTS.items():
+            P, bvh = surf[name]; polys, bnd = mesh_topology(G['ob'])
+            kdf = kd_of([Vector(P[list(f)].mean(0)) for f in polys])
+            kde = kd_of([Vector(p) for p in P[bnd]])
+            ecount = defaultdict(int)
+            for f in polys:
+                for j in range(len(f)):
+                    ecount[tuple(sorted((f[j], f[(j + 1) % len(f)])))] += 1
+            fbnd = [[(f[j], f[(j + 1) % len(f)]) for j in range(len(f)) if ecount[tuple(sorted((f[j], f[(j + 1) % len(f)])))] == 1]
+                    for f in polys]
+            under, patch, edge = np.zeros(len(rest), bool), {}, np.zeros(len(rest), bool)
+            for k, q in enumerate(rest):
+                co = Vector(q)
+                loc, nrm, fi, d = bvh.find_nearest(co, 0.08)
+                edge[k] = bnd.any() and kde.find(co)[2] < 0.015
+                if loc is None:
+                    continue
+                # under: the cloth lies over the skin (along the skin's normal),
+                # or the nearest cloth is clearly above it (not its edge)
+                over = bvh.ray_cast(co + Vector(rest_n[k]) * 1e-4, Vector(rest_n[k]), 0.08)[0] is not None
+                if over or (not on_boundary(P, fbnd[fi], loc) and (co - loc).dot(nrm) < -0.5 * max(d, 1e-9)):
+                    under[k] = True
+                    patch[k] = {j for _, j, _ in kdf.find_range(co, max(0.03, 1.5 * d))} | {fi}
+            SKIN_REL[name] = (polys, under, patch, edge, fbnd)
+    VNS = {name: vertex_normals(surf[name][0], SKIN_REL[name][0]) for name in GARMENTS}
+
+    def through_body(name, need):
+        """Skin that was under the garment at rest must stay at least `need`
+        under the cloth that was over it (a fold of the same garment pressed
+        close, as in an armpit, doesn't count); any other skin must stay
+        outside the garment (away from its edges, where in and out blur)."""
+        P, bvh = surf[name]; polys, under, patch, edge, fbnd = SKIN_REL[name]
         n, worst, at = 0, 0.0, []
-        for p, r in zip(pts, rest):
+        for k, (p, r) in enumerate(zip(pts, rest)):
             co = Vector(p)
-            loc, nrm, idx, d = bvh.find_nearest(co, 0.03)
+            loc, nrm, fi, d = bvh.find_nearest(co, 0.08 if under[k] else 0.03)
             if loc is None:
                 continue
-            s = (co - loc).dot(nrm)
-            if d > 1e-5 and abs(s) < 0.95 * d:
-                continue
-            if s + need > 0:
-                n += 1; worst = max(worst, s + need); at.append(tuple(round(float(x), 3) for x in r))
+            if under[k]:
+                if fi not in patch[k]:
+                    loc, nrm, d = patch_nearest(P, polys, patch[k], co)
+                s = (co - loc).dot(nrm)
+                if d > 1e-5 and abs(s) < 0.95 * d:
+                    continue                           # beyond the cloth's edge
+                short = s + need
+            else:
+                if edge[k] or on_boundary(P, fbnd[fi], loc):
+                    continue                                   # beside the cloth's edge
+                s = (co - loc).dot(smooth_normal(P, VNS[name], polys[fi], loc))
+                if d > 1e-5 and abs(s) < 0.95 * d:
+                    continue
+                short = -s
+            if short > 0:
+                n += 1; worst = max(worst, short); at.append(tuple(round(float(x), 3) for x in r))
+                if os.environ.get('DRESS_DEBUG'):
+                    log('      debug %s k=%d under=%s edge=%s s=%.4f d=%.4f rest=%s posed=%s' % (name, k, under[k], edge[k], s, d, np.round(r, 3), np.round(p, 3)))
         return n, worst, at
     for name in GARMENTS:
-        n, w, at = through_body(surf[name][1], 0.0003)
+        n, w, at = through_body(name, 0.0003)
         bad['body>' + name] = (n, w)
         if at:
             log('   body through %s at rest positions %s' % (name, at[:6]))
@@ -1797,7 +2029,7 @@ def mat_simple(name, color, rough, metal=0.0, bump_scale=0.0, sheen=0.0):
 
 def mat_sole():
     S = Shader('Sole_Rubber')
-    z = S.sep(S.n('ShaderNodeTexCoord').outputs['Object'])[2]
+    z = S.sep(S.R())[2]
     stripe = S.m('MULTIPLY', S.m('GREATER_THAN', z, SOLE_BOTTOM + 0.0085), S.m('LESS_THAN', z, SOLE_BOTTOM + 0.0115))
     groove = S.line(z, 0.0012, SHOE_FLOOR + 0.004)
     c = S.mix(stripe, (0.86, 0.85, 0.80, 1), (0.05, 0.07, 0.16, 1))
@@ -1862,36 +2094,291 @@ def export_glb(path):
         bpy.data.materials.remove(m)
 
 
+# ================================================================== FITTING (other characters)
+# A character made by make_npc_bodies.py wears the same clothes as Human.glb:
+# they are fitted from its finished, dressed .blend.
+#   1. Body to body: MB-Lab's female and male templates share their UV layout,
+#      so every skin point of the reference has its place on this body (the
+#      same UV). That displacement field is smoothed over the skin (the UV
+#      triangles of two bodies don't match one to one: unsmoothed it crumples
+#      the cloth).
+#   2. Each garment follows the field (a Surface Deform bound to the reference's
+#      skin, then driven to this body's shape), keeping its cut, its hems, its
+#      seams and its bone weights.
+#   3. The steps of the making that depend on the body are run again: the
+#      shirt hangs from the chest (or the bust, or a belly), and every garment
+#      is pushed off the body and off the garment under it by the same gaps, in
+#      the same order (socks, shoes, jeans, shirt), and any fold relaxed.
+FIT_NAMES = ['TShirt', 'Jeans', 'Socks_L', 'Socks_R'] + [p + s for s in 'LR' for p in ('Shoe_', 'Sole_', 'ShoeCollar_', 'Laces_', 'Eyelets_')]
+SHX = (abs(BONE['upperarm_L'][0].x) + abs(BONE['upperarm_R'][0].x)) / 2      # the shoulder joints (0.181 on Human.glb)
+
+
+def skin_tris_uv(m):
+    SK = {i for i, mm in enumerate(m.materials) if mm and mm.name.split('.')[0] in ('MBLab_skin3', 'MBlab_generic')}
+    m.calc_loop_triangles(); uv = m.uv_layers[0].data
+    return [([m.loops[l].vertex_index for l in t.loops], [uv[l].uv[:] for l in t.loops])
+            for t in m.loop_triangles if t.material_index in SK]
+
+
+def bm_of(ob):
+    bm = bmesh.new(); bm.from_mesh(ob.data); bm.verts.ensure_lookup_table(); bm.normal_update()
+    return bm
+
+
+def bm_done(bm, ob):
+    bm.to_mesh(ob.data); ob.data.update(); bm.free()
+
+
+def fit_clothes(ref_blend):
+    before = set(bpy.data.objects)
+    ref_name = STYLE.get('fit_body', 'm_ca01')
+    with bpy.data.libraries.load(ref_blend, link=False) as (src, dst):
+        dst.objects = [n for n in src.objects if n in FIT_NAMES or n == ref_name]
+    for o in dst.objects:
+        scene.collection.objects.link(o)
+    new = [o for o in bpy.data.objects if o not in before]
+    ref = next(o for o in new if o.type == 'MESH' and any(m and m.name.startswith('MBLab_skin3') for m in o.data.materials))
+    O = {o.name.split('.')[0]: o for o in new if o.type == 'MESH' and o is not ref}
+    assert sorted(O) == sorted(FIT_NAMES), sorted(O)
+    for o in new:
+        o.parent = None; o.matrix_world = Matrix.Identity(4)
+        for m in list(o.modifiers):
+            if m.type in ('ARMATURE', 'MASK'):
+                o.modifiers.remove(m)
+    for o in list(bpy.data.objects):
+        if o.type == 'ARMATURE' and o is not arm:
+            bpy.data.objects.remove(o)
+    # 1. the reference's skin -> this body (by UV), smoothed
+    R = np.array([v.co[:] for v in ref.data.vertices])
+    rt, bt = skin_tris_uv(ref.data), skin_tris_uv(me)
+    # (how far each point of the shirt and the jeans stood off the reference's skin)
+    ref_bvh = BVHTree.FromPolygons([Vector(p) for p in R], [tuple(vs) for vs, _ in rt])
+    GAP_REF = {n: signed_gaps(np.array([v.co[:] for v in O[n].data.vertices]), ref_bvh, 0.1) for n in ('TShirt', 'Jeans')}
+    uvbvh = BVHTree.FromPolygons([Vector((u[0], u[1], 0)) for t in bt for u in t[1]], [(3 * k, 3 * k + 1, 3 * k + 2) for k in range(len(bt))])
+    T = np.full(R.shape, np.nan)
+    for vs, us in rt:
+        for vi, u in zip(vs, us):
+            if np.isfinite(T[vi, 0]):
+                continue
+            loc, nrm, fi, d = uvbvh.find_nearest(Vector((u[0], u[1], 0)), 0.02)
+            if loc is None:
+                continue
+            bvs, bus = bt[fi]
+            P = geometry.barycentric_transform(loc, *[Vector((x[0], x[1], 0)) for x in bus], *[Vector(CO[v]) for v in bvs])
+            if all(math.isfinite(c) for c in P):
+                T[vi] = P[:]
+    skinv = sorted({v for vs, _ in rt for v in vs})
+    ok = [v for v in skinv if np.isfinite(T[v, 0])]
+    kd = kd_of([Vector(R[v]) for v in ok])
+    for v in skinv:
+        if not np.isfinite(T[v, 0]):
+            nb = kd.find_n(R[v], 8); w = np.array([1 / (d + 1e-4) for _, _, d in nb])
+            T[v] = R[v] + (w[:, None] * np.array([T[ok[k]] - R[ok[k]] for _, k, _ in nb])).sum(0) / w.sum()
+    idx = {v: i for i, v in enumerate(skinv)}
+    E = np.array(sorted({(min(idx[vs[k]], idx[vs[(k + 1) % 3]]), max(idx[vs[k]], idx[vs[(k + 1) % 3]])) for vs, _ in rt for k in range(3)}))
+    D = np.array([T[v] - R[v] for v in skinv])
+    for _ in range(15):
+        S = np.zeros_like(D); cnt = np.zeros(len(D))
+        np.add.at(S, E[:, 0], D[E[:, 1]]); np.add.at(S, E[:, 1], D[E[:, 0]])
+        np.add.at(cnt, E[:, 0], 1); np.add.at(cnt, E[:, 1], 1)
+        D = 0.5 * D + 0.5 * S / np.maximum(cnt, 1)[:, None]
+    log('fit: %d of %d reference skin points found on this body by UV' % (len(ok), len(skinv)))
+    # 2. every garment follows the field: each point of cloth by the affine map
+    #    that best carries the reference's skin around it onto this body (moving
+    #    least squares, the neighbourhood growing with the distance from the
+    #    skin: a shoe moves almost as one piece with its foot); along the skin's
+    #    normal the map stays near the identity, so the gaps are kept
+    Rk = np.array([R[v] for v in skinv]); Tk = Rk + D
+    kd = kd_of([Vector(p) for p in Rk])
+    for o in O.values():
+        P = np.array([v.co[:] for v in o.data.vertices]); Q = np.empty_like(P)
+        for i, g in enumerate(P):
+            co = Vector(g)
+            d0 = kd.find(co)[2]
+            sig = max(0.02, 1.2 * d0)
+            nb = kd.find_range(co, 2.5 * sig)
+            if len(nb) < 12:
+                nb = kd.find_n(co, 12)
+            ix = np.array([k for _, k, _ in nb]); dd = np.array([d for _, _, d in nb])
+            w = np.exp(-(dd / sig) ** 2); w /= w.sum()
+            mr = w @ Rk[ix]; mt = w @ Tk[ix]
+            Rc = Rk[ix] - mr; Tc = Tk[ix] - mt
+            C = (Rc * w[:, None]).T @ Rc; X = (Tc * w[:, None]).T @ Rc
+            lam = 0.05 * np.trace(C) / 3 + 1e-10
+            A = (X + lam * np.eye(3)) @ np.linalg.inv(C + lam * np.eye(3))
+            Q[i] = mt + A @ (g - mr)
+        o.data.vertices.foreach_set('co', Q.ravel()); o.data.update()
+    bpy.data.objects.remove(ref)
+    # the garments as the making leaves them (thickness, edge margins)
+    def shirt_margin(p, i):
+        if abs(p[0]) <= SHX + 0.019:
+            return 0.03
+        in_crease = BNRM[i][2] < -0.5 and abs(CO[i][0]) < SHX + 0.084
+        return 0.003 if in_crease else 0.013
+    for s in 'LR':
+        # (the sock's top shows above the shoe: a band of skin is kept under it;
+        #  its lower cuts are deep inside the shoe)
+        GARMENTS['Socks_' + s] = dict(ob=O['Socks_' + s], thickness=0.0009,
+                                      margin=lambda p, i, zt=float(ZN(0.11)): 0.018 if p[2] > zt else 0.003)
+        SHOE_PARTS[s] = dict(upper=O['Shoe_' + s], sole=O['Sole_' + s], pad=O['ShoeCollar_' + s],
+                             laces=O['Laces_' + s], eyelets=O['Eyelets_' + s])
+    z_hem = float(ZN(0.3))
+    GARMENTS['Jeans'] = dict(ob=O['Jeans'], thickness=0.0024, margin=lambda p, i: 0.07 if p[2] < z_hem else 0.03)
+    GARMENTS['TShirt'] = dict(ob=O['TShirt'], thickness=0.0016, margin=shirt_margin)
+    log('fit: folds after following the body', {n: count_folds(o) for n, o in O.items() if count_folds(o)})
+    # 3. what depends on the body, again
+    # where the cloth hugs the body (the collar, the sleeve ends, the waistband)
+    # it keeps the reference's gap to the skin, on this body
+    def attr(ob, n):
+        a = ob.data.attributes[n]; v = np.empty(len(a.data)); a.data.foreach_get('value', v); return v
+    def hug(ob, w):
+        P = np.array([v.co[:] for v in ob.data.vertices]); g = np.clip(GAP_REF[ob.name.split('.')[0]], 0.002, 0.03)
+        for i in np.where(w > 0)[0]:
+            loc, nrm, fi, d = BODY_BVH.find_nearest(Vector(P[i]), 0.1)
+            if loc is not None:
+                P[i] = P[i] * (1 - w[i]) + np.array(loc + nrm * g[i]) * w[i]
+        ob.data.vertices.foreach_set('co', P.ravel()); ob.data.update()
+        return int((w > 0).sum())
+    sh = O['TShirt']; bm = bm_of(sh)
+    sleeve = np.clip(deform_sums(bm, [g.index for g in sh.vertex_groups if 'upperarm' in g.name]) * 1.6, 0, 1); bm.free()
+    n1 = hug(sh, np.maximum(smoothstep(0.05, 0.02, attr(sh, 'neck')), smoothstep(0.05, 0.02, attr(sh, 'hem')) * (sleeve > 0.5)))
+    n2 = hug(O['Jeans'], smoothstep(0.05, 0.02, attr(O['Jeans'], 'dw')))
+    log('fit: collar and sleeve ends (%d points), waistband (%d points) at the reference gap' % (n1, n2))
+    for s in 'LR':
+        ob = O['Socks_' + s]; bm = bm_of(ob); P, _ = arrays(bm)
+        P = pushout(P, [(BODY_BVH, 0.0014)])
+        P = clear_points(bm, P, CO[SKINV], 0.0010)
+        defold(bm, P, [(BODY_BVH, 0.0014)], tag='socks ' + s); bm_done(bm, ob)
+    for s in 'LR':
+        sock = thick_bvh(O['Socks_' + s], 0.0009)
+        ob = O['Shoe_' + s]; bm = bm_of(ob); P, _ = arrays(bm)
+        P = pushout(P, [(BODY_BVH, 0.0058), (sock, 0.0032, True)])
+        write_back(bm, P); relax_folds(bm, tag='shoe ' + s); bm_done(bm, ob)
+        for k in ('pad', 'laces'):
+            ob = SHOE_PARTS[s][k]; P = np.array([v.co[:] for v in ob.data.vertices])
+            P = pushout(P, [(sock, 0.002, True)])
+            ob.data.vertices.foreach_set('co', P.ravel()); ob.data.update()
+    ob = O['Jeans']; bm = bm_of(ob); P, _ = arrays(bm)
+    dg = bpy.context.evaluated_depsgraph_get()
+    layers = [(BODY_BVH, 0.0032)]
+    for s in 'LR':
+        layers += [(BVHTree.FromObject(SHOE_PARTS[s][k], dg), 0.004, True) for k in ('upper', 'sole', 'pad', 'laces')]
+        layers += [(thick_bvh(O['Socks_' + s], 0.001), 0.006, True)]
+    # (along the cloth's own normal, at most 1 cm a step: the hem around the
+    #  smaller or larger shoe must widen or narrow, never fold out sideways)
+    for _ in range(6):
+        Q = pushout_cloth(bm, P.copy(), layers)
+        dlt = Q - P; L_ = np.linalg.norm(dlt, axis=1)
+        P = P + dlt * np.minimum(1.0, 0.01 / np.maximum(L_, 1e-9))[:, None]
+    P = clear_points(bm, P, CO[SKINV], 0.003)
+    defold(bm, P, layers, tag='jeans'); relax_folds(bm, tag='jeans'); bm_done(bm, ob)
+    # the shirt hangs from the chest, as make_shirt() makes it, over this body
+    ob = O['TShirt']; bm = bm_of(ob); P, _ = arrays(bm)
+    arm_groups = [g.index for g in ob.vertex_groups                # (the shirt's own groups, by name)
+                  if any(k in g.name for k in ('upperarm', 'lowerarm', 'hand', 'thumb', 'index', 'middle', 'ring', 'pinky'))]
+    armw = np.clip(deform_sums(bm, arm_groups) * 1.6, 0, 1)
+    z = P[:, 2]
+    sel = (SAMP_ARM < 0.2) & (SAMP[:, 2] < ZN(1.40)) & (SAMP[:, 2] > ZN(0.84))
+    jb = bm_of(O['Jeans'])
+    jpts = np.array([(v.co + v.normal * (0.0024 + 0.0085))[:] for v in jb.verts]); jb.free()
+    jeans_out = thick_bvh(O['Jeans'], 0.0024 + 0.008)
+    oy = LM['Y'][3] + (-0.02 - REF_LM['Y'][3])               # the torso's axis (y = -0.02 on Human.glb)
+    torso = Hang(np.vstack([SAMP[sel], jpts[jpts[:, 2] > ZN(0.84)]]), (0, oy, 0), (0, 0, 1), (1, 0, 0),
+                 htop=float(ZN(1.40)), dh=0.012, nth=96)
+    torso.membrane(0.0075, 0.0048, 60, hang=0.85 * smoothstep(ZN(1.34), ZN(1.2), torso.row_h()))
+    h, th, r = torso.coords(P)
+    wt = smoothstep(ZN(1.37), ZN(1.29), z) * (1 - armw)
+    r2 = np.maximum(r, torso.radius(h, th))                   # (never pulled in: only out to the hanging sheet)
+    P = P * (1 - wt[:, None]) + torso.place(h, th, r2) * wt[:, None]
+    P = pushout(P, [(BODY_BVH, 0.0042), (jeans_out, 0.0035, True)])
+    P = clear_points(bm, P, np.vstack([CO[SKINV], jpts]), 0.003)
+    defold(bm, P, [(BODY_BVH, 0.0042), (jeans_out, 0.0035, True)], tag='shirt')
+    relax_folds(bm, tag='shirt'); bm_done(bm, ob)
+    # above the armpits, outside the sleeves (the collar, the shoulders, the
+    # upper back) the making gives the shirt the skin's own bone weights: here,
+    # this body's skin's
+    sh = O['TShirt']; P = np.array([v.co[:] for v in sh.data.vertices])
+    sk = np.where(SKINV)[0]; kds = kd_of([Vector(CO[i]) for i in sk])
+    names = {g.index: g.name for g in sh.vertex_groups}
+    upper = {g.index for g in sh.vertex_groups if 'upperarm' in g.name}
+    nmix = 0
+    for v in sh.data.vertices:
+        tot = sum(g.weight for g in v.groups if g.group in names)
+        sl = sum(g.weight for g in v.groups if g.group in upper) / max(tot, 1e-9)
+        f = float(smoothstep(ZN(1.26), ZN(1.33), v.co.z)) * (1 - min(1.0, sl * 1.6))
+        if f <= 0:
+            continue
+        acc = defaultdict(float); wt_ = 0.0
+        for co, k, d in kds.find_n(v.co, 6):
+            ww = 1.0 / (d + 0.002); wt_ += ww
+            for gi in np.nonzero(W[sk[k]])[0]:
+                acc[GN[gi]] += ww * W[sk[k], gi]
+        new = {n: x / wt_ for n, x in acc.items() if n != 'visible' and x / wt_ > 0.002}
+        old = {names[g.group]: g.weight / max(tot, 1e-9) for g in v.groups}
+        for g in list(v.groups):
+            sh.vertex_groups[g.group].remove([v.index])
+        for n in set(old) | set(new):
+            w_ = old.get(n, 0.0) * (1 - f) + new.get(n, 0.0) * f
+            if w_ > 0.002:
+                (sh.vertex_groups.get(n) or sh.vertex_groups.new(name=n)).add([v.index], w_, 'REPLACE')
+        nmix += 1
+    log('fit: %d shirt points (collar, shoulders, upper back) weighted to this skin' % nmix)
+    log('fit: folds at the end', {n: count_folds(o) for n, o in O.items() if count_folds(o)})
+    log('fit: clothes fitted from', os.path.basename(ref_blend))
+
+
+def rig_fitted():
+    """The fitted clothes keep their bone weights and thickness: parent them to
+    this skeleton, its Armature modifier first (before the thickness)."""
+    obs = [G['ob'] for G in GARMENTS.values()] + [SHOE_PARTS[s][k] for s in 'LR' for k in ('sole', 'pad', 'laces', 'eyelets')]
+    for ob in obs:
+        ob.parent = arm
+        m = ob.modifiers.new('Armature', 'ARMATURE'); m.object = arm
+        with bpy.context.temp_override(object=ob, active_object=ob):
+            bpy.ops.object.modifier_move_to_index(modifier='Armature', index=0)
+
+
 # ================================================================== run
-make_socks()
-make_shoes()
-make_jeans()
-make_shirt()
-for s in 'LR':
-    rig(GARMENTS['Socks_' + s]['ob'], s, GARMENTS['Socks_' + s]['thickness'])
-    GARMENTS['Shoe_' + s] = dict(ob=SHOE_PARTS[s]['upper'], thickness=0.0024, margin=0.02)
-    rig(SHOE_PARTS[s]['upper'], s, 0.0024)
-    for k in ('sole', 'pad', 'laces', 'eyelets'):
-        rig(SHOE_PARTS[s][k], s)
-rig(GARMENTS['Jeans']['ob'], thickness=GARMENTS['Jeans']['thickness'])
-rig(GARMENTS['TShirt']['ob'], thickness=GARMENTS['TShirt']['thickness'])
+if FIT_FROM is None:
+    make_socks()
+    make_shoes()
+    make_jeans()
+    make_shirt()
+    for s in 'LR':
+        rig(GARMENTS['Socks_' + s]['ob'], s, GARMENTS['Socks_' + s]['thickness'])
+        GARMENTS['Shoe_' + s] = dict(ob=SHOE_PARTS[s]['upper'], thickness=0.0024, margin=0.02)
+        rig(SHOE_PARTS[s]['upper'], s, 0.0024)
+        for k in ('sole', 'pad', 'laces', 'eyelets'):
+            rig(SHOE_PARTS[s][k], s)
+    rig(GARMENTS['Jeans']['ob'], thickness=GARMENTS['Jeans']['thickness'])
+    rig(GARMENTS['TShirt']['ob'], thickness=GARMENTS['TShirt']['thickness'])
+else:
+    fit_clothes(FIT_FROM)
+    for s in 'LR':
+        GARMENTS['Shoe_' + s] = dict(ob=SHOE_PARTS[s]['upper'], thickness=0.0024, margin=0.02)
+    rig_fitted()
 covered = build_mask()
 check('rest', covered)
 apply_pose(WALK)
 check('walk', covered)
 clear_pose()
-assign_materials()
+if FIT_FROM is None:
+    assign_materials()                                       # (fitted clothes keep the reference's)
 arm['walk_test_pose'] = json.dumps(WALK)
 # the soles now carry the body: lift the whole rig so the shoes stand on z = 0
-arm.location.z = -SOLE_BOTTOM
+if FIT_FROM is None:
+    lift = -SOLE_BOTTOM
+else:
+    lift = -min(min(v.co.z for v in SHOE_PARTS[s]['sole'].data.vertices) for s in 'LR')
+arm.location.z = lift
 bpy.context.view_layer.update()
-REPORT['lifted_by_m'] = round(-SOLE_BOTTOM, 4)
+REPORT['lifted_by_m'] = round(lift, 4)
 REPORT['objects'] = {o.name: len(o.data.vertices) for o in bpy.data.objects if o.type == 'MESH'}
-blend = os.path.join(OUT, 'human_dressed.blend')
+blend = os.path.join(OUT, NAME + '_dressed.blend')
 bpy.ops.file.pack_all()
 bpy.context.preferences.filepaths.save_version = 0          # no .blend1 backups
 bpy.ops.wm.save_as_mainfile(filepath=blend, compress=True)
-export_glb(os.path.join(OUT, 'human_dressed.glb'))
-with open(os.path.join(OUT, 'human_dressed_report.json'), 'w') as f:
+export_glb(os.path.join(OUT, NAME + '_dressed.glb'))
+with open(os.path.join(OUT, NAME + '_dressed_report.json'), 'w') as f:
     json.dump(REPORT, f, indent=1)
 log('saved', blend, 'and the .glb; report:', json.dumps({k: v for k, v in REPORT.items() if k.startswith('check')}))

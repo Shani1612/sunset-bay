@@ -16,7 +16,7 @@ SPP = int(a[4]) if len(a) > 4 else 64
 os.makedirs(outdir, exist_ok=True)
 bpy.ops.wm.open_mainfile(filepath=blend)
 sc = bpy.context.scene
-arm = bpy.data.objects['m_ca01_skeleton']
+arm = next(o for o in bpy.data.objects if o.type == 'ARMATURE')
 z0 = arm.location.z
 
 sc.render.engine = 'CYCLES'; sc.cycles.device = 'CPU'; sc.cycles.samples = SPP
@@ -65,6 +65,10 @@ VIEWS = {
     'sleeve': ((0.95, -0.6, 1.45), (0.27, 0, 1.38), 50, 1.0),
     'backtorso': ((0.3, 1.6, 1.4), (0, 0, 1.2), 50, 0.8),
     'face': ((0.0, -0.75, 1.68), (0, 0, 1.64), 50, 1.0),
+    'headside': ((0.75, -0.25, 1.75), (0, 0, 1.68), 50, 1.0),
+    'headback': ((0.25, 0.75, 1.78), (0, 0, 1.68), 50, 1.0),
+    'headtop': ((0.15, -0.55, 2.05), (0, -0.03, 1.74), 50, 1.0),
+    'headq': ((0.45, -0.5, 1.85), (0, -0.02, 1.70), 50, 1.0),
     'crotch': ((0.12, -0.75, 0.86), (0.0, -0.05, 0.88), 50, 1.0),
     'pit': ((0.45, -0.55, 1.22), (0.19, 0.02, 1.38), 50, 1.0),
     'pitlow': ((0.42, -0.3, 1.05), (0.24, 0.02, 1.36), 50, 1.0),
@@ -86,13 +90,15 @@ def clear():
     bpy.context.view_layer.update()
 
 
+HEADZ = arm.data.bones['head'].head_local.z
 for v in views:
     name, _, pose = v.partition('@')
     clear()
     if pose == 'walk':
         apply_walk()
     loc, tgt, lens, aspect = VIEWS[name]
-    loc = Vector(loc) + Vector((0, 0, z0)); tgt = Vector(tgt) + Vector((0, 0, z0))
+    dz = (HEADZ - 1.6519) if name in ('face', 'headside', 'headback', 'headtop', 'headq', 'neck', 'neckside') else 0.0
+    loc = Vector(loc) + Vector((0, 0, z0 + dz)); tgt = Vector(tgt) + Vector((0, 0, z0 + dz))
     sc.render.resolution_y = H; sc.render.resolution_x = int(H * aspect)
     cam.location = loc; cam.data.lens = lens
     cam.rotation_euler = (tgt - loc).to_track_quat('-Z', 'Y').to_euler()
