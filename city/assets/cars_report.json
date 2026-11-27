@@ -1,0 +1,927 @@
+{
+ "hatch": {
+  "dimensions": {
+   "length": 4.0554,
+   "width": 1.7464,
+   "height": 1.455,
+   "front_overhang": 0.8035,
+   "rear_overhang": 0.6719,
+   "wheelbase": 2.58,
+   "track": 1.52,
+   "clearance": 0.16
+  },
+  "tyre_clearance_min": 0.017,
+  "tyre_clearance_where": {
+   "axle": 1.225,
+   "side": 1,
+   "steer": -0.58,
+   "pitch": 0.009,
+   "roll": -0.015,
+   "point": [
+    1.118,
+    0.744,
+    0.61
+   ],
+   "body": [
+    1.113,
+    0.744,
+    0.626
+   ]
+  },
+  "tyre_outer_vs_body": -0.0146,
+  "mesh": {
+   "hatch_body": {
+    "faces": 6480,
+    "degenerate": 0
+   },
+   "hatch_details": {
+    "faces": 9145,
+    "degenerate": 0
+   },
+   "hatch_cabin": {
+    "faces": 7675,
+    "degenerate": 0
+   },
+   "hatch_door": {
+    "faces": 1689,
+    "degenerate": 0
+   }
+  },
+  "cabin_rays_missing": 0,
+  "door_gap": {
+   "p2": 0.004,
+   "median": 0.0044
+  },
+  "door_gap_smallest": [
+   {
+    "gap": 0.0039,
+    "at": [
+     0.656,
+     0.751,
+     1.108
+    ],
+    "body": [
+     0.6575,
+     0.7483,
+     1.1109
+    ]
+   },
+   {
+    "gap": 0.004,
+    "at": [
+     0.947,
+     0.767,
+     0.998
+    ],
+    "body": [
+     0.9479,
+     0.7638,
+     1.0008
+    ]
+   },
+   {
+    "gap": 0.0041,
+    "at": [
+     0.223,
+     0.706,
+     1.282
+    ],
+    "body": [
+     0.2246,
+     0.7035,
+     1.2855
+    ]
+   },
+   {
+    "gap": 0.0042,
+    "at": [
+     -0.212,
+     0.63,
+     1.407
+    ],
+    "body": [
+     -0.2119,
+     0.6265,
+     1.4086
+    ]
+   },
+   {
+    "gap": 0.0042,
+    "at": [
+     -0.293,
+     0.63,
+     1.411
+    ],
+    "body": [
+     -0.2933,
+     0.6261,
+     1.4124
+    ]
+   },
+   {
+    "gap": 0.0042,
+    "at": [
+     0.109,
+     0.637,
+     1.363
+    ],
+    "body": [
+     0.1099,
+     0.6333,
+     1.3648
+    ]
+   }
+  ],
+  "door_sweep_hits": 0,
+  "drivers": {
+   "player": {
+    "dashboard_penetration": 0.0,
+    "wheel_penetration": 0.0,
+    "roof_penetration": 0.0,
+    "door_penetration": 0.0,
+    "head_room": 0.129,
+    "hands_to_rim": 0.0232
+   },
+   "f_af01": {
+    "dashboard_penetration": 0.0,
+    "wheel_penetration": 0.0,
+    "roof_penetration": 0.0,
+    "door_penetration": 0.0,
+    "head_room": 0.1599,
+    "hands_to_rim": 0.052
+   },
+   "f_as01": {
+    "dashboard_penetration": 0.0,
+    "wheel_penetration": 0.0,
+    "roof_penetration": 0.0,
+    "door_penetration": 0.0,
+    "head_room": 0.2086,
+    "hands_to_rim": 0.0391
+   },
+   "f_ca01": {
+    "dashboard_penetration": 0.0,
+    "wheel_penetration": 0.0,
+    "roof_penetration": 0.0,
+    "door_penetration": 0.0,
+    "head_room": 0.1764,
+    "hands_to_rim": 0.0299
+   },
+   "f_la01": {
+    "dashboard_penetration": 0.0,
+    "wheel_penetration": 0.0,
+    "roof_penetration": 0.0,
+    "door_penetration": 0.0,
+    "head_room": 0.1689,
+    "hands_to_rim": 0.0345
+   },
+   "m_af01": {
+    "dashboard_penetration": 0.0,
+    "wheel_penetration": 0.0,
+    "roof_penetration": 0.0,
+    "door_penetration": 0.0,
+    "head_room": 0.1558,
+    "hands_to_rim": 0.0049
+   },
+   "m_as01": {
+    "dashboard_penetration": 0.0,
+    "wheel_penetration": 0.0,
+    "roof_penetration": 0.0,
+    "door_penetration": 0.0,
+    "head_room": 0.1531,
+    "hands_to_rim": 0.0051
+   },
+   "m_ca01": {
+    "dashboard_penetration": 0.0,
+    "wheel_penetration": 0.0,
+    "roof_penetration": 0.0,
+    "door_penetration": 0.0,
+    "head_room": 0.1351,
+    "hands_to_rim": 0.0116
+   },
+   "m_la01": {
+    "dashboard_penetration": 0.0,
+    "wheel_penetration": 0.0,
+    "roof_penetration": 0.0,
+    "door_penetration": 0.0,
+    "head_room": 0.0405,
+    "hands_to_rim": 0.0526
+   }
+  },
+  "mirror_indicator_left": 72,
+  "lamps": {
+   "DRL": {
+    "faces": 164,
+    "front": 164,
+    "rear": 0,
+    "left": 82,
+    "right": 82
+   },
+   "Tail": {
+    "faces": 1404,
+    "front": 0,
+    "rear": 1404,
+    "left": 702,
+    "right": 702
+   },
+   "Brake": {
+    "faces": 664,
+    "front": 0,
+    "rear": 664,
+    "left": 332,
+    "right": 332
+   },
+   "IndL": {
+    "faces": 249,
+    "front": 151,
+    "rear": 98,
+    "left": 249,
+    "right": 0
+   },
+   "IndR": {
+    "faces": 249,
+    "front": 151,
+    "rear": 98,
+    "left": 0,
+    "right": 249
+   },
+   "Reverse": {
+    "faces": 184,
+    "front": 0,
+    "rear": 184,
+    "left": 92,
+    "right": 92
+   }
+  },
+  "wheel_fit": {
+   "centre_from_hip": [
+    0.25,
+    0.0,
+    0.515
+   ],
+   "tilt_deg": 15.0,
+   "radius": 0.205,
+   "fit_err": 0.0686
+  },
+  "seat_hip": [
+   -0.155,
+   0.36,
+   0.447
+  ],
+  "fails": [],
+  "ok": true,
+  "game_triangles": {
+   "hatch_body": {
+    "triangles": 44128,
+    "materials": [
+     "Glass",
+     "Lamps",
+     "Paint",
+     "Plate",
+     "Trim"
+    ]
+   },
+   "hatch_door": {
+    "triangles": 3151,
+    "materials": [
+     "Glass",
+     "Lamps",
+     "Paint",
+     "Trim"
+    ]
+   },
+   "hatch_wheel": {
+    "triangles": 3356,
+    "materials": [
+     "Trim"
+    ]
+   },
+   "hatch_lod1": {
+    "triangles": 11542,
+    "materials": [
+     "Glass",
+     "Lamps",
+     "Paint",
+     "Plate",
+     "Trim"
+    ]
+   }
+  }
+ },
+ "sedan": {
+  "dimensions": {
+   "length": 4.6548,
+   "width": 1.7959,
+   "height": 1.4488,
+   "front_overhang": 0.9235,
+   "rear_overhang": 1.0313,
+   "wheelbase": 2.7,
+   "track": 1.56,
+   "clearance": 0.16
+  },
+  "tyre_clearance_min": 0.0175,
+  "tyre_clearance_where": {
+   "axle": 1.405,
+   "side": 1,
+   "steer": 0.58,
+   "pitch": 0.009,
+   "roll": -0.015,
+   "point": [
+    1.262,
+    0.777,
+    0.608
+   ],
+   "body": [
+    1.255,
+    0.777,
+    0.624
+   ]
+  },
+  "tyre_outer_vs_body": -0.0144,
+  "mesh": {
+   "sedan_body": {
+    "faces": 6476,
+    "degenerate": 0
+   },
+   "sedan_details": {
+    "faces": 8944,
+    "degenerate": 0
+   },
+   "sedan_cabin": {
+    "faces": 7959,
+    "degenerate": 0
+   },
+   "sedan_door": {
+    "faces": 1677,
+    "degenerate": 0
+   }
+  },
+  "cabin_rays_missing": 0,
+  "door_gap": {
+   "p2": 0.004,
+   "median": 0.0044
+  },
+  "door_gap_smallest": [
+   {
+    "gap": 0.0039,
+    "at": [
+     0.73,
+     0.772,
+     1.09
+    ],
+    "body": [
+     0.7317,
+     0.7697,
+     1.0927
+    ]
+   },
+   {
+    "gap": 0.004,
+    "at": [
+     1.042,
+     0.787,
+     0.978
+    ],
+    "body": [
+     1.0428,
+     0.7844,
+     0.9808
+    ]
+   },
+   {
+    "gap": 0.0041,
+    "at": [
+     0.407,
+     0.737,
+     1.235
+    ],
+    "body": [
+     0.4088,
+     0.7351,
+     1.238
+    ]
+   },
+   {
+    "gap": 0.0042,
+    "at": [
+     0.061,
+     0.655,
+     1.392
+    ],
+    "body": [
+     0.0611,
+     0.6512,
+     1.3937
+    ]
+   },
+   {
+    "gap": 0.0042,
+    "at": [
+     -0.058,
+     0.652,
+     1.405
+    ],
+    "body": [
+     -0.0581,
+     0.6486,
+     1.4067
+    ]
+   },
+   {
+    "gap": 0.0042,
+    "at": [
+     -0.378,
+     0.65,
+     1.413
+    ],
+    "body": [
+     -0.3778,
+     0.6459,
+     1.4145
+    ]
+   }
+  ],
+  "door_sweep_hits": 0,
+  "drivers": {
+   "player": {
+    "dashboard_penetration": 0.0,
+    "wheel_penetration": 0.0,
+    "roof_penetration": 0.0,
+    "door_penetration": 0.0,
+    "head_room": 0.1219,
+    "hands_to_rim": 0.0232
+   },
+   "f_af01": {
+    "dashboard_penetration": 0.0,
+    "wheel_penetration": 0.0,
+    "roof_penetration": 0.0,
+    "door_penetration": 0.0,
+    "head_room": 0.1515,
+    "hands_to_rim": 0.052
+   },
+   "f_as01": {
+    "dashboard_penetration": 0.0,
+    "wheel_penetration": 0.0,
+    "roof_penetration": 0.0,
+    "door_penetration": 0.0,
+    "head_room": 0.2022,
+    "hands_to_rim": 0.0391
+   },
+   "f_ca01": {
+    "dashboard_penetration": 0.0,
+    "wheel_penetration": 0.0,
+    "roof_penetration": 0.0,
+    "door_penetration": 0.0,
+    "head_room": 0.1688,
+    "hands_to_rim": 0.0299
+   },
+   "f_la01": {
+    "dashboard_penetration": 0.0,
+    "wheel_penetration": 0.0,
+    "roof_penetration": 0.0,
+    "door_penetration": 0.0,
+    "head_room": 0.1626,
+    "hands_to_rim": 0.0345
+   },
+   "m_af01": {
+    "dashboard_penetration": 0.0,
+    "wheel_penetration": 0.0,
+    "roof_penetration": 0.0,
+    "door_penetration": 0.0,
+    "head_room": 0.1478,
+    "hands_to_rim": 0.0049
+   },
+   "m_as01": {
+    "dashboard_penetration": 0.0,
+    "wheel_penetration": 0.0,
+    "roof_penetration": 0.0,
+    "door_penetration": 0.0,
+    "head_room": 0.145,
+    "hands_to_rim": 0.0051
+   },
+   "m_ca01": {
+    "dashboard_penetration": 0.0,
+    "wheel_penetration": 0.0,
+    "roof_penetration": 0.0,
+    "door_penetration": 0.0,
+    "head_room": 0.1268,
+    "hands_to_rim": 0.0116
+   },
+   "m_la01": {
+    "dashboard_penetration": 0.0,
+    "wheel_penetration": 0.0,
+    "roof_penetration": 0.0,
+    "door_penetration": 0.0,
+    "head_room": 0.0344,
+    "hands_to_rim": 0.0526
+   }
+  },
+  "mirror_indicator_left": 56,
+  "lamps": {
+   "DRL": {
+    "faces": 176,
+    "front": 176,
+    "rear": 0,
+    "left": 88,
+    "right": 88
+   },
+   "Tail": {
+    "faces": 1568,
+    "front": 0,
+    "rear": 1568,
+    "left": 784,
+    "right": 784
+   },
+   "Brake": {
+    "faces": 532,
+    "front": 0,
+    "rear": 532,
+    "left": 266,
+    "right": 266
+   },
+   "IndL": {
+    "faces": 230,
+    "front": 141,
+    "rear": 89,
+    "left": 230,
+    "right": 0
+   },
+   "IndR": {
+    "faces": 230,
+    "front": 141,
+    "rear": 89,
+    "left": 0,
+    "right": 230
+   },
+   "Reverse": {
+    "faces": 164,
+    "front": 0,
+    "rear": 164,
+    "left": 82,
+    "right": 82
+   }
+  },
+  "wheel_fit": {
+   "centre_from_hip": [
+    0.25,
+    0.0,
+    0.515
+   ],
+   "tilt_deg": 15.0,
+   "radius": 0.205,
+   "fit_err": 0.0686
+  },
+  "seat_hip": [
+   0.025,
+   0.36,
+   0.447
+  ],
+  "fails": [],
+  "ok": true,
+  "game_triangles": {
+   "sedan_body": {
+    "triangles": 44379,
+    "materials": [
+     "Glass",
+     "Lamps",
+     "Paint",
+     "Plate",
+     "Trim"
+    ]
+   },
+   "sedan_door": {
+    "triangles": 3139,
+    "materials": [
+     "Glass",
+     "Lamps",
+     "Paint",
+     "Trim"
+    ]
+   },
+   "sedan_wheel": {
+    "triangles": 3356,
+    "materials": [
+     "Trim"
+    ]
+   },
+   "sedan_lod1": {
+    "triangles": 11772,
+    "materials": [
+     "Glass",
+     "Lamps",
+     "Paint",
+     "Plate",
+     "Trim"
+    ]
+   }
+  }
+ },
+ "suv": {
+  "dimensions": {
+   "length": 4.5063,
+   "width": 1.8569,
+   "height": 1.6665,
+   "front_overhang": 0.9239,
+   "rear_overhang": 0.9024,
+   "wheelbase": 2.68,
+   "track": 1.6,
+   "clearance": 0.2
+  },
+  "tyre_clearance_min": 0.022,
+  "tyre_clearance_where": {
+   "axle": 1.33,
+   "side": 1,
+   "steer": 0.58,
+   "pitch": 0.009,
+   "roll": -0.015,
+   "point": [
+    1.172,
+    0.796,
+    0.675
+   ],
+   "body": [
+    1.163,
+    0.796,
+    0.695
+   ]
+  },
+  "tyre_outer_vs_body": -0.0141,
+  "mesh": {
+   "suv_body": {
+    "faces": 6741,
+    "degenerate": 0
+   },
+   "suv_details": {
+    "faces": 12823,
+    "degenerate": 0
+   },
+   "suv_cabin": {
+    "faces": 7809,
+    "degenerate": 0
+   },
+   "suv_door": {
+    "faces": 1704,
+    "degenerate": 0
+   }
+  },
+  "cabin_rays_missing": 0,
+  "door_gap": {
+   "p2": 0.0036,
+   "median": 0.0044
+  },
+  "door_gap_smallest": [
+   {
+    "gap": 0.0028,
+    "at": [
+     -0.348,
+     0.698,
+     1.598
+    ],
+    "body": [
+     -0.3478,
+     0.6958,
+     1.5997
+    ]
+   },
+   {
+    "gap": 0.0038,
+    "at": [
+     0.857,
+     0.809,
+     1.221
+    ],
+    "body": [
+     0.8581,
+     0.807,
+     1.2232
+    ]
+   },
+   {
+    "gap": 0.0041,
+    "at": [
+     -0.29,
+     0.7,
+     1.597
+    ],
+    "body": [
+     -0.2895,
+     0.6959,
+     1.5991
+    ]
+   },
+   {
+    "gap": 0.0042,
+    "at": [
+     -0.121,
+     0.7,
+     1.593
+    ],
+    "body": [
+     -0.121,
+     0.6965,
+     1.5948
+    ]
+   },
+   {
+    "gap": 0.0042,
+    "at": [
+     0.122,
+     0.703,
+     1.572
+    ],
+    "body": [
+     0.1224,
+     0.6989,
+     1.5734
+    ]
+   },
+   {
+    "gap": 0.0042,
+    "at": [
+     0.244,
+     0.705,
+     1.547
+    ],
+    "body": [
+     0.2449,
+     0.7016,
+     1.5489
+    ]
+   }
+  ],
+  "door_sweep_hits": 0,
+  "drivers": {
+   "player": {
+    "dashboard_penetration": 0.0,
+    "wheel_penetration": 0.0,
+    "roof_penetration": 0.0,
+    "door_penetration": 0.0,
+    "head_room": 0.1962,
+    "hands_to_rim": 0.0232
+   },
+   "f_af01": {
+    "dashboard_penetration": 0.0,
+    "wheel_penetration": 0.0,
+    "roof_penetration": 0.0,
+    "door_penetration": 0.0,
+    "head_room": 0.2282,
+    "hands_to_rim": 0.052
+   },
+   "f_as01": {
+    "dashboard_penetration": 0.0,
+    "wheel_penetration": 0.0,
+    "roof_penetration": 0.0,
+    "door_penetration": 0.0,
+    "head_room": 0.2751,
+    "hands_to_rim": 0.0391
+   },
+   "f_ca01": {
+    "dashboard_penetration": 0.0,
+    "wheel_penetration": 0.0,
+    "roof_penetration": 0.0,
+    "door_penetration": 0.0,
+    "head_room": 0.2428,
+    "hands_to_rim": 0.0299
+   },
+   "f_la01": {
+    "dashboard_penetration": 0.0,
+    "wheel_penetration": 0.0,
+    "roof_penetration": 0.0,
+    "door_penetration": 0.0,
+    "head_room": 0.2352,
+    "hands_to_rim": 0.0345
+   },
+   "m_af01": {
+    "dashboard_penetration": 0.0,
+    "wheel_penetration": 0.0,
+    "roof_penetration": 0.0,
+    "door_penetration": 0.0,
+    "head_room": 0.2235,
+    "hands_to_rim": 0.0049
+   },
+   "m_as01": {
+    "dashboard_penetration": 0.0,
+    "wheel_penetration": 0.0,
+    "roof_penetration": 0.0,
+    "door_penetration": 0.0,
+    "head_room": 0.2215,
+    "hands_to_rim": 0.0051
+   },
+   "m_ca01": {
+    "dashboard_penetration": 0.0,
+    "wheel_penetration": 0.0,
+    "roof_penetration": 0.0,
+    "door_penetration": 0.0,
+    "head_room": 0.2038,
+    "hands_to_rim": 0.0116
+   },
+   "m_la01": {
+    "dashboard_penetration": 0.0,
+    "wheel_penetration": 0.0,
+    "roof_penetration": 0.0,
+    "door_penetration": 0.0,
+    "head_room": 0.1067,
+    "hands_to_rim": 0.0526
+   }
+  },
+  "mirror_indicator_left": 68,
+  "lamps": {
+   "DRL": {
+    "faces": 138,
+    "front": 138,
+    "rear": 0,
+    "left": 69,
+    "right": 69
+   },
+   "Tail": {
+    "faces": 1570,
+    "front": 0,
+    "rear": 1570,
+    "left": 785,
+    "right": 785
+   },
+   "Brake": {
+    "faces": 530,
+    "front": 0,
+    "rear": 530,
+    "left": 265,
+    "right": 265
+   },
+   "IndL": {
+    "faces": 248,
+    "front": 150,
+    "rear": 98,
+    "left": 248,
+    "right": 0
+   },
+   "IndR": {
+    "faces": 248,
+    "front": 150,
+    "rear": 98,
+    "left": 0,
+    "right": 248
+   },
+   "Reverse": {
+    "faces": 186,
+    "front": 0,
+    "rear": 186,
+    "left": 93,
+    "right": 93
+   }
+  },
+  "wheel_fit": {
+   "centre_from_hip": [
+    0.25,
+    0.0,
+    0.515
+   ],
+   "tilt_deg": 15.0,
+   "radius": 0.205,
+   "fit_err": 0.0686
+  },
+  "seat_hip": [
+   -0.05,
+   0.36,
+   0.562
+  ],
+  "fails": [],
+  "ok": true,
+  "game_triangles": {
+   "suv_body": {
+    "triangles": 51346,
+    "materials": [
+     "Glass",
+     "Lamps",
+     "Paint",
+     "Plate",
+     "Trim"
+    ]
+   },
+   "suv_door": {
+    "triangles": 3188,
+    "materials": [
+     "Glass",
+     "Lamps",
+     "Paint",
+     "Trim"
+    ]
+   },
+   "suv_wheel": {
+    "triangles": 3296,
+    "materials": [
+     "Trim"
+    ]
+   },
+   "suv_lod1": {
+    "triangles": 13848,
+    "materials": [
+     "Glass",
+     "Lamps",
+     "Paint",
+     "Plate",
+     "Trim"
+    ]
+   }
+  }
+ },
+ "ok": true
+}

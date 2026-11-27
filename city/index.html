@@ -275,7 +275,7 @@ const gltfL=new THREE.GLTFLoader(manager);
 const draco=new THREE.DRACOLoader();draco.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/libs/draco/');
 gltfL.setDRACOLoader(draco);
 const texL=new THREE.TextureLoader(manager);
-let CITY=null,ACTORS=null,loadFailed=false;
+let CITY=null,ACTORS=null,CARSG=null,loadFailed=false;
 function fail(e){
   if(loadFailed)return;loadFailed=true;console.error(e);
   $('status').textContent='לא הצלחנו לטעון את העיר.';
@@ -290,6 +290,7 @@ for(const n of TEXN){
 }
 gltfL.load('assets/city.glb',g=>{CITY=g;},undefined,fail);
 gltfL.load('assets/actors.glb',g=>{ACTORS=g;},undefined,fail);
+gltfL.load('assets/cars.glb',g=>{CARSG=g;},undefined,fail);     // the cars (blender/make_cars.py)
 // the player: the dressed, animated character (if it can't load, the game falls back to a simple figure)
 let PLAYERGLB=null;
 gltfL.load('assets/player.glb',g=>{PLAYERGLB=g;},undefined,e=>{console.warn('player model',e);});
@@ -304,7 +305,7 @@ function loadNPCs(info){
     try{const T=npcTemplate(id,info[id],g);NPC_T.push(T);npcArrived(T);}catch(e){console.warn('person '+id,e);}},undefined,e=>console.warn('person '+id,e));
 }
 function startNPCs(){new THREE.FileLoader().load('assets/npc/npcs.json',t=>{try{loadNPCs(JSON.parse(t));}catch(e){console.warn('people',e);}},undefined,e=>console.warn('people',e));}
-manager.onLoad=()=>{if(loadFailed||!CITY||!ACTORS)return;
+manager.onLoad=()=>{if(loadFailed||!CITY||!ACTORS||!CARSG)return;
   // the Hebrew lettering is drawn on canvases: wait (briefly) for the web font
   const font=document.fonts&&document.fonts.load?document.fonts.load('900 40px Heebo').catch(()=>{}):Promise.resolve();
   Promise.race([font,new Promise(r=>setTimeout(r,2500))]).then(()=>{
@@ -325,14 +326,21 @@ function tpl(root,name,turn){
 // building the world
 // =====================================================================================================
 const CARS={},PEOPLE=[],BUILD={variants:[],chunks:[]},PROPS={};
+const CAR_KINDS=['hatch','sedan','suv'];
 const CHUNKS=[];
 function buildWorld(){
-  // ---- actors
-  for(const k of ['i20','sedan']){
-    const body=tpl(ACTORS.scene,'car_'+k,true),red=body.parts.find(p=>p.name==='RedLens');
-    const bb=new THREE.Box3();for(const p of body.parts){p.geo.computeBoundingBox();bb.union(p.geo.boundingBox);}
-    for(const p of body.parts)if(p.name==='Glass')p.mat.opacity=0.42;      // a lighter tint, so the people inside show
-    CARS[k]={body,wheel:tpl(ACTORS.scene,'wheel_'+k,true),x:body.x,red:red?red.mat:new THREE.MeshStandardMaterial({color:0x8e0c08}),width:bb.max.x-bb.min.x,len:bb.max.z-bb.min.z};
+  // ---- the cars (blender/make_cars.py): a hatchback, a sedan and a crossover; each the near model (body with its
+  // cabin, the driver's door, one left wheel) and the far one; their measures in the body's extras (game axes)
+  for(const k of CAR_KINDS){
+    const body=tpl(CARSG.scene,k+'_body',true),T={body,door:tpl(CARSG.scene,k+'_door',true),wheel:tpl(CARSG.scene,k+'_wheel',true),
+      lod1:tpl(CARSG.scene,k+'_lod1',true),x:body.x};
+    for(const part of [T.body,T.door,T.wheel,T.lod1])for(const p of part.parts){
+      if(p.name==='Glass'){p.mat.opacity=0.42;p.mat.depthWrite=false;}          // a light tint: the cabin and the people show
+      for(const t of [p.mat.map,p.mat.roughnessMap,p.mat.metalnessMap])if(t){   // the atlases: one texel per part
+        t.magFilter=t.minFilter=THREE.NearestFilter;t.generateMipmaps=false;t.needsUpdate=true;}
+    }
+    T.width=2*T.x.half_width;T.len=T.x.length;
+    CARS[k]=T;
   }
   for(let i=0;ACTORS.scene.getObjectByName('P'+i+'_torso');i++){
     const v={};for(const p of ['torso','armL','armR','legL','legR'])v[p]=tpl(ACTORS.scene,'P'+i+'_'+p,true);
@@ -345,7 +353,7 @@ function buildWorld(){
   }
   for(const n of ['Lamp','Hydrant','Bin','Bollard','Manhole','Signal','Bench','Palm0','Palm1','Palm2','Palm0L','Palm1L','Palm2L','Tree0','Tree1','Tree0L','Tree1L'])
     PROPS[n]=tpl(CITY.scene,n,false);
-  // number plates: where each model's plates are (front and back), from its 'Plate' faces
+  // number plates: where each model's plates are (front and back), from its 'Plate' faces (not drawn themselves)
   for(const k in CARS){
     const pl=CARS[k].body.parts.find(p=>p.name==='Plate');CARS[k].plates=[];if(!pl)continue;
     const P=pl.geo.attributes.position;
@@ -965,7 +973,7 @@ function animHero(h,dt,o){
   }
 }
 function seatPerson(p,car){ // sitting at the wheel: reclined at the hips, thighs forward, hands on the wheel
-  if(p.hero||p.npc){p.g.rotation.set(0,0,0);p.g.position.set(car.seat.x,car.seat.y-p.hip+(car.kind==='sedan'?0.05:0),car.seat.z);car.bodyG.add(p.g);p.g.visible=true;
+  if(p.hero||p.npc){p.g.rotation.set(0,0,0);p.g.position.set(car.seat.x,car.seat.y-p.hip,car.seat.z);car.bodyG.add(p.g);p.g.visible=true;
     for(const n in p.A){p.w[n]=n==='Drive'?1:0;p.A[n].setEffectiveWeight(p.w[n]);}
     if(p.npc){npcLOD(p,Math.hypot(car.x-camera.position.x,car.z-camera.position.z));setPress(p);p.mixer.update(0);}   // (a pose held: no updates needed)
     return;}
@@ -1082,10 +1090,34 @@ const ALLCARS=[];
 const paintC={};
 function paintMat(hex){return paintC[hex]||(paintC[hex]=MOBILE?new THREE.MeshStandardMaterial({color:lc(hex),roughness:0.35,metalness:0.4}):
   new THREE.MeshPhysicalMaterial({color:lc(hex),roughness:0.32,metalness:0.45,clearcoat:1,clearcoatRoughness:0.06}));}
+// the lamps: each car its own 8x1 glow map, one texel per lamp function (the model's lamp faces sample their
+// function's texel): daytime running lights, tail, brake, left and right indicators, reverse (lens, reflector: none)
+const LAMP_CELL={drl:0,tail:1,brake:2,indL:3,indR:4,reverse:5};
+const LAMP_COL=[[255,246,232],[255,24,10],[255,24,10],[255,138,18],[255,138,18],[255,255,255]];
+function lampMat(T){
+  const base=T.body.parts.find(p=>p.name==='Lamps');
+  const data=new Uint8Array(32),tex=new THREE.DataTexture(data,8,1,THREE.RGBAFormat);
+  tex.magFilter=tex.minFilter=THREE.NearestFilter;tex.generateMipmaps=false;
+  const m=(base?base.mat:new THREE.MeshStandardMaterial({color:0x888888})).clone();
+  m.emissiveMap=tex;m.emissive=new THREE.Color(1,1,1);m.emissiveIntensity=2.4;
+  return {mat:m,tex,data,key:''};
+}
+function setLamps(c,on){   // on: {drl,tail,brake,indL,indR,reverse} in 0..1
+  const L=c.lamp,k=[on.drl,on.tail,on.brake,on.indL,on.indR,on.reverse].map(v=>v.toFixed(2)).join();
+  if(k===L.key)return;L.key=k;
+  for(const n in LAMP_CELL){const i=LAMP_CELL[n],v=on[n];for(let j=0;j<3;j++)L.data[i*4+j]=Math.round(LAMP_COL[i][j]*v);L.data[i*4+3]=255;}
+  L.tex.needsUpdate=true;
+}
+const CAR_LOD=MOBILE?25:35;       // metres: nearer cars get the detailed model (cabin, door, turning wheels)
 function makeCar(kind,hex){
   const T=CARS[kind],X=T.x,g=new THREE.Group(),bodyG=new THREE.Group();g.add(bodyG);
-  const red=T.red.clone(),paint=paintMat(hex);
-  for(const q of T.body.parts){const m=new THREE.Mesh(q.geo,q.name==='Paint'?paint:q.name==='RedLens'?red:q.mat);m.castShadow=!q.mat.transparent;m.receiveShadow=true;bodyG.add(m);}
+  const paint=paintMat(hex),lamp=lampMat(T);
+  const add=(parts,parent)=>{for(const q of parts){if(q.name==='Plate')continue;   // (the game draws its own plates there)
+    const m=new THREE.Mesh(q.geo,q.name==='Paint'?paint:q.name==='Lamps'?lamp.mat:q.mat);m.castShadow=!q.mat.transparent;m.receiveShadow=true;parent.add(m);}};
+  const near=new THREE.Group(),far=new THREE.Group();bodyG.add(near,far);
+  add(T.body.parts,near);add(T.lod1.parts,far);far.visible=false;
+  // the driver's door turns about its hinge (vertical, at its front edge)
+  const doorG=new THREE.Group();doorG.position.set(X.door_hinge[0],X.door_hinge[1],X.door_hinge[2]);near.add(doorG);add(T.door.parts,doorG);
   const wheels=[];
   for(const front of [true,false])for(const sx of [1,-1]){
     const piv=new THREE.Group();piv.position.set(sx*X.track,X.wheel_r,front?X.wheels_front:X.wheels_rear);
@@ -1100,10 +1132,12 @@ function makeCar(kind,hex){
     m.position.set(P.c.x,P.c.y,P.z+P.sg*0.006);if(P.sg<0)m.rotation.y=Math.PI;bodyG.add(m);
   }
   scene.add(g);
-  const c={g,bodyG,wheels,red,hex,kind,len:T.len,hw:0.88,wb:X.wheels_front-X.wheels_rear,R:X.wheel_r,
+  const c={g,bodyG,near,far,wheels,lamp,hex,kind,len:T.len,hw:X.half_width,wb:X.wheels_front-X.wheels_rear,R:X.wheel_r,vmax:X.vmax,
     x:0,z:0,y:0,a:0,v:0,vx:0,vz:0,steer:0,mode:'parked',braking:false,roll:0,pitch:0,rollV:0,pitchV:0,prevA:0,prevV:0,
-    driver:null,cruise:rand(10.5,13.5),ghost:0,stuck:0,bump:0,
-    seat:{x:0.36,y:kind==='i20'?0.58:0.43,z:X.wheels_front-1.38}};
+    driver:null,cruise:rand(10.5,13.5),ghost:0,stuck:0,bump:0,ind:0,indHold:0,lod:0,
+    door:{g:doorG,a:0,open:X.door_open,hold:0},
+    seat:{x:X.seat[0],y:X.seat[1],z:X.seat[2]}};
+  setLamps(c,{drl:0,tail:0,brake:0,indL:0,indR:0,reverse:0});
   ALLCARS.push(c);return c;
 }
 function plateTex(){
@@ -1123,11 +1157,21 @@ function carVisuals(c,dt){
   c.g.position.set(c.x,c.y,c.z);c.g.rotation.y=c.a;
   // suspension: lean into corners, dive under braking, squat when accelerating
   const sh=Math.min(dt,1/30),yaw=wrapA(c.a-c.prevA)/Math.max(dt,1e-4),acc=(c.v-c.prevV)/Math.max(dt,1e-4);c.prevA=c.a;c.prevV=c.v;
-  const tR=clamp(-yaw*c.v*0.004,-0.05,0.05),tP=clamp(acc*0.003,-0.035,0.035);
+  const tR=clamp(-yaw*c.v*0.004,-0.015,0.015),tP=clamp(acc*0.003,-0.009,0.009);   // (the limits the models' wheel arches are checked for)
   c.rollV+=((tR-c.roll)*90-c.rollV*12)*sh;c.roll+=c.rollV*sh;c.pitchV+=((tP-c.pitch)*80-c.pitchV*11)*sh;c.pitch+=c.pitchV*sh;
   c.bodyG.rotation.set(c.pitch,0,c.roll);
   for(const w of c.wheels){w.spin.rotation.x+=c.v*dt/c.R;if(w.front)w.piv.rotation.y=c.steer;}
-  c.red.emissiveIntensity=c.braking?2.6:0.3;
+  // near or far model (the far one has its wheels in it)
+  const dc=Math.hypot(c.x-camera.position.x,c.z-camera.position.z),L=dc>CAR_LOD+(c.lod?-2:2)?1:0;
+  if(L!==c.lod){c.lod=L;c.near.visible=!L;c.far.visible=!!L;for(const w of c.wheels)w.piv.visible=!L;}
+  // the driver's door: opens while held, then closes (about 0.35 s each way)
+  const D=c.door;D.hold-=dt;const want=D.hold>0?D.open:0;
+  if(D.a!==want){D.a=want>D.a?Math.min(want,D.a+dt*D.open/0.35):Math.max(want,D.a-dt*D.open/0.35);D.g.rotation.y=-D.a;}
+  // lamps: running lights always, brake, reverse, the indicators blinking at 1.5 Hz
+  if(c.indHold>0)c.indHold-=dt;
+  const blink=(clock*1.5)%1<0.5?1:0,occupied=c.mode==='ai'||c.mode==='player';
+  setLamps(c,{drl:occupied?0.85:0,tail:occupied?0.12:0,brake:occupied&&c.braking?1:0,indL:c.ind>0?blink:0,indR:c.ind<0?blink:0,
+    reverse:c.mode==='player'&&c.v<-0.3?0.9:0});
 }
 
 // =====================================================================================================
@@ -1136,16 +1180,21 @@ function carVisuals(c,dt){
 const TRAFFIC_N=MOBILE?14:26,PARKED_N=MOBILE?16:30,PED_N=MOBILE?22:44;
 function laneStart(n,k){const d=DIRS[k];return {x:n.x+d.dx*ROAD-d.dz*LANE,z:n.z+d.dz*ROAD+d.dx*LANE};}
 function laneEnd(n,k){const d=DIRS[k];return {x:n.x-d.dx*ROAD-d.dz*LANE,z:n.z-d.dz*ROAD+d.dx*LANE};}
-function setLane(c,n,k,s){const B=nextNode(n,k),p0=laneStart(n,k),p1=laneEnd(B,k);c.ai={n,k,B,phase:'lane',p0,p1,len:Math.hypot(p1.x-p0.x,p1.z-p0.z),s:s||0};}
+function setLane(c,n,k,s){const B=nextNode(n,k),p0=laneStart(n,k),p1=laneEnd(B,k);
+  c.ai={n,k,B,phase:'lane',p0,p1,len:Math.hypot(p1.x-p0.x,p1.z-p0.z),s:s||0,next:nextDir(B,k)};}
+// where a car goes at the next crossing (chosen as its lane starts: the indicator shows it 30 m before)
+function nextDir(B,k){const opts=B.dirs.filter(q=>q!==opposite(k));let nk=pick(opts);if(opts.includes(k)&&Math.random()<0.45)nk=k;return nk;}
+// +1 a left turn, -1 a right turn, 0 straight on (game axes: a car facing +z has its left at +x)
+function turnSide(k1,k2){const a=DIRS[k1],b=DIRS[k2];return Math.sign(b.dx*a.dz-b.dz*a.dx);}
 function bez(p0,c,p1,t){if(!c)return {x:lerp(p0.x,p1.x,t),z:lerp(p0.z,p1.z,t)};const u=1-t;return {x:u*u*p0.x+2*u*t*c.x+t*t*p1.x,z:u*u*p0.z+2*u*t*c.z+t*t*p1.z};}
 function setTurn(c,s){
   const ai=c.ai,B=ai.B,opts=B.dirs.filter(k=>k!==opposite(ai.k));
-  let nk=pick(opts);if(opts.includes(ai.k)&&Math.random()<0.45)nk=ai.k;
+  const nk=ai.next!==undefined&&opts.includes(ai.next)?ai.next:nextDir(B,ai.k);
   const p0=ai.p1,p2=laneStart(B,nk),d=DIRS[ai.k];
   const ctrl=nk===ai.k?null:(d.ax==='x'?{x:p2.x,z:p0.z}:{x:p0.x,z:p2.z});
   const tab=[0];let L=0,prev=p0;
   for(let i=1;i<=12;i++){const q=bez(p0,ctrl,p2,i/12);L+=Math.hypot(q.x-prev.x,q.z-prev.z);tab.push(L);prev=q;}
-  c.ai={n:B,k:nk,B,phase:'turn',p0,c:ctrl,p1:p2,len:L,tab,s:s||0};
+  c.ai={n:B,k:nk,B,phase:'turn',p0,c:ctrl,p1:p2,len:L,tab,s:s||0,side:turnSide(ai.k,nk)};
 }
 function pathAt(ai,s){
   if(ai.phase==='lane'){const t=s/ai.len,d=DIRS[ai.k];return {x:lerp(ai.p0.x,ai.p1.x,t),z:lerp(ai.p0.z,ai.p1.z,t),a:Math.atan2(d.dx,d.dz)};}
@@ -1161,7 +1210,7 @@ function initTraffic(){
     const n=pick(NODES),k=pick(n.dirs),B=nextNode(n,k),len=Math.hypot(B.x-n.x,B.z-n.z)-2*ROAD,s=rand(4,len-24);
     const p0=laneStart(n,k),d=DIRS[k],x=p0.x+d.dx*s,z=p0.z+d.dz*s;
     if(ALLCARS.some(o=>Math.hypot(o.x-x,o.z-z)<12))continue;
-    const c=makeCar(Math.random()<0.5?'i20':'sedan',pick(CARCOLS));c.mode='ai';setLane(c,n,k,s);
+    const c=makeCar(pick(CAR_KINDS),pick(CARCOLS));c.mode='ai';setLane(c,n,k,s);
     const P=pathAt(c.ai,s);c.x=P.x;c.z=P.z;c.a=c.prevA=P.a;c.v=c.cruise*0.6;
   }
   // parked along the curbs, facing the way that side's traffic goes
@@ -1171,7 +1220,7 @@ function initTraffic(){
   for(let k=0;k<PARKED_N&&spots.length;k++){
     const [x,z,a]=spots.splice(Math.floor(Math.random()*spots.length),1)[0];
     if(ALLCARS.some(o=>Math.hypot(o.x-x,o.z-z)<6))continue;
-    const c=makeCar(Math.random()<0.5?'i20':'sedan',pick(CARCOLS));c.x=x;c.z=z;c.a=c.prevA=a;c.mode='parked';
+    const c=makeCar(pick(CAR_KINDS),pick(CARCOLS));c.x=x;c.z=z;c.a=c.prevA=a;c.mode='parked';
   }
   for(const c of ALLCARS)carVisuals(c,0.016);
 }
@@ -1202,6 +1251,7 @@ function updateAI(c,dt){
   if(c.v<0.2&&gap<99){c.stuck+=dt;if(c.stuck>7){c.ghost=2.5;c.stuck=0;}}else c.stuck=0;
   ai.s+=c.v*dt;
   if(ai.s>=ai.len){const extra=ai.s-ai.len;if(ai.phase==='lane')setTurn(c,extra);else setLane(c,ai.n,ai.k,extra);}
+  c.ind=c.ai.phase==='turn'?c.ai.side:(c.ai.len-c.ai.s<30?turnSide(c.ai.k,c.ai.next):0);
   const P=pathAt(c.ai,c.ai.s),da=wrapA(P.a-c.a);
   c.x=P.x;c.z=P.z;c.steer=clamp(da/Math.max(dt,1e-4)*c.wb/Math.max(c.v,1),-0.5,0.5);c.a=P.a;
 }
@@ -1216,9 +1266,9 @@ function updateDrivers(){
   for(const d of DRIVERS)if(d.car&&d.p.npc)npcLOD(d.p,Math.hypot(d.car.x-camera.position.x,d.car.z-camera.position.z));
 }
 function freeCar(c,vx,vz){ // a traffic car knocked out of its lane: it rolls to a stop and stays parked
-  if(c.driver){const d=c.driver;d.car=null;unseat(d.p);d.p.g.visible=false;c.driver=null;
+  if(c.driver){const d=c.driver;d.car=null;unseat(d.p);d.p.g.visible=false;c.driver=null;c.door.hold=0.6;   // (out of the driver's door)
     const l={x:Math.cos(c.a),z:-Math.sin(c.a)};const q=spawnPed(c.x+l.x*(c.hw+0.8),c.z+l.z*(c.hw+0.8));if(q)flee(q,c.x,c.z,6);}
-  c.mode='free';c.ai=null;c.vx=vx;c.vz=vz;
+  c.mode='free';c.ai=null;c.vx=vx;c.vz=vz;c.ind=0;
 }
 
 // =====================================================================================================
@@ -1227,7 +1277,7 @@ function freeCar(c,vx,vz){ // a traffic car knocked out of its lane: it rolls to
 function carPhysics(c,inp,dt){
   const fx=Math.sin(c.a),fz=Math.cos(c.a),lx=Math.cos(c.a),lz=-Math.sin(c.a);
   let vf=c.vx*fx+c.vz*fz,vl=c.vx*lx+c.vz*lz;
-  const vmax=c.kind==='i20'?40:44;
+  const vmax=c.vmax;
   if(inp.up){vf+=(vf<-0.3?16:7.6*(1-Math.max(0,vf)/vmax))*dt;}
   else if(inp.down){vf+=vf>0.3?-15*dt:-4.5*dt*(vf>-9?1:0);}
   else vf-=Math.sign(vf)*Math.min(Math.abs(vf),(0.5+Math.abs(vf)*0.06)*dt);
@@ -1397,7 +1447,7 @@ function enterCar(c){
     const l={x:Math.cos(c.a),z:-Math.sin(c.a)},q=spawnPed(c.x+l.x*(c.hw+0.9),c.z+l.z*(c.hw+0.9));if(q)flee(q,player.x,player.z,6);
     c.vx=Math.sin(c.a)*c.v;c.vz=Math.cos(c.a)*c.v;c.ai=null;
   }
-  c.mode='player';player.car=c;seatPerson(player.model,c);
+  c.mode='player';player.car=c;seatPerson(player.model,c);c.door.hold=0.45;c.ind=0;   // the door opens, and shuts behind them
   const wi=WALKERS.indexOf(player);if(wi>=0)WALKERS.splice(wi,1);
   if(job)jobEvent('enter',c);
   camYaw=c.a;
@@ -1407,7 +1457,7 @@ function exitCar(){
   const l={x:Math.cos(c.a),z:-Math.sin(c.a)};
   const o={x:c.x+l.x*(c.hw+0.75),z:c.z+l.z*(c.hw+0.75)};collideCircle(o,0.35);
   player.x=o.x;player.z=o.z;player.a=c.a;player.vy=0;
-  unseat(player.model);player.car=null;c.mode=Math.hypot(c.vx,c.vz)>0.2?'free':'parked';c.braking=false;
+  unseat(player.model);player.car=null;c.mode=Math.hypot(c.vx,c.vz)>0.2?'free':'parked';c.braking=false;c.ind=0;c.door.hold=0.6;
   WALKERS.push(player);camYaw=c.a;
 }
 function updatePlayer(dt){
@@ -1416,6 +1466,8 @@ function updatePlayer(dt){
     const c=player.car,inp={up:keys.has('KeyW')||keys.has('ArrowUp')||touch.y<-0.3,down:keys.has('KeyS')||keys.has('ArrowDown')||touch.y>0.3,
       hand:keys.has('Space'),steer:(keys.has('KeyA')||keys.has('ArrowLeft')?1:0)-(keys.has('KeyD')||keys.has('ArrowRight')?1:0)-touch.x};
     carPhysics(c,inp,dt);engine(Math.abs(c.v),inp.up);
+    // the indicator comes on by itself in a sharp, slow turn
+    if(Math.abs(c.steer)>0.22&&Math.abs(c.v)<9){c.ind=Math.sign(c.steer);c.indHold=0.9;}else if(c.indHold<=0)c.ind=0;
     if(m.hero)animHero(m,dt,{seated:true,speed:0,ground:true});
     for(const q of peds){if(q.mode==='knocked'||q.mode==='ride'||Math.abs(c.v)<2.5)continue;
       for(const o of carCircles(c))if(Math.hypot(q.x-o.x,q.z-o.z)<c.hw+0.35){knock(q,c);break;}}
@@ -1525,7 +1577,7 @@ function newJob(){
     setJob('משלוח','לקוח מחכה ל'+CAR_NAME[c.kind]+' המסומן. היכנס אליו.');
   }
 }
-const CAR_NAME={i20:'יונדאי i20',sedan:'סדאן'};
+const CAR_NAME={hatch:"האצ'בק",sedan:'סדאן',suv:'רכב פנאי'};
 function setJob(title,text){
   const el=$('job');el.innerHTML='';if(!title)return;
   const t=document.createElement('div');t.className='t';t.textContent=title;
@@ -1747,7 +1799,7 @@ $('play').addEventListener('click',startGame);
 requestAnimationFrame(frame);
 // for automated checks
 window.__city={get state(){return state;},start:startGame,player,cars:ALLCARS,peds,keys,camera,renderer,scene,NODES,SIGNALS,CHUNKS,NPC_T,DRIVERS,knock,npcLOD,get npcIds(){return NPC_IDS;},
-  get job(){return job;},get money(){return money;},cancelJob(){if(job)endJob(false,'');jobCool=0;},light,enterCar,exitCar,nearestCar,
+  get job(){return job;},get money(){return money;},cancelJob(){if(job)endJob(false,'');jobCool=0;},light,enterCar,exitCar,nearestCar,freeCar,CARS,setLamps,
   setYaw(v){camYaw=v;lookT=2;},setPitch(v){camPitch=v;},
   step(n,dt){dt=dt||1/60;for(let i=0;i<n;i++)update(dt);renderer.render(scene,camera);}};
 

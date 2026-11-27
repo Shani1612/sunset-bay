@@ -13,17 +13,98 @@ city by the sea on a sunny day:
   the skyline.
 - **The seafront:** a promenade with palms and benches, a beach with umbrellas, and the sea.
 - **The streets:** palms and trees, lamps, crosswalks and traffic lights.
-- **Cars and people:** Hyundai i20s and sedans with Israeli number plates, and people. Traffic stops at red lights,
-  pedestrians cross with the lights, and you can walk, take any car, and do delivery and taxi jobs (paid in shekels).
+- **Cars and people:** a hatchback, a sedan and a crossover with Israeli number plates, and people. Traffic stops at
+  red lights and signals before it turns, pedestrians cross with the lights, and you can walk, take any car, and do
+  delivery and taxi jobs (paid in shekels).
 
-The assets come from `blender/export_city_assets.py` (`city/assets/city.glb` and the textures in `city/assets/tex/`)
-and `blender/export_game_assets.py` (`city/assets/actors.glb`). Like the cars and people in the first game, they load
+The assets come from `blender/export_city_assets.py` (`city/assets/city.glb` and the textures in `city/assets/tex/`),
+`blender/export_game_assets.py` (`city/assets/actors.glb`) and `blender/make_cars.py` (`city/assets/cars.glb`). Like the cars and people in the first game, they load
 from a web server: to play locally, run `python3 -m http.server` in the repository and open `http://localhost:8000/city/`.
 
 On desktop the cars and people are detailed models made in Blender (`assets/sunset_bay.glb`, built by
 `blender/export_game_assets.py`): a Hyundai i20 (the SUVs), a sedan, and six people who walk, run and aim.
 They load from the web server, so to see them locally serve the folder (for example `python3 -m http.server`)
 rather than opening the file directly. On phones, or if the models can't load, the game uses its simple models.
+
+## The city's cars (`city/assets/cars.glb`)
+
+Three original cars, with no brand or model copied, built in Blender from code by `blender/make_cars.py`:
+
+| | Hatchback (`hatch`) | Sedan (`sedan`) | Crossover (`suv`) |
+|---|---|---|---|
+| Length × width × height | 4.05 × 1.75 × 1.46 m | 4.65 × 1.80 × 1.45 m | 4.50 × 1.86 × 1.66 m |
+| Wheelbase, track | 2.58, 1.52 m | 2.70, 1.56 m | 2.68, 1.60 m |
+| Overhangs (front, rear) | 0.80, 0.67 m | 0.92, 1.03 m | 0.92, 0.90 m |
+| Tyres | 195/55 R16 | 205/55 R16 | 225/60 R17 |
+| Ground clearance | 0.16 m | 0.16 m | 0.20 m |
+| Wheels | five double spokes | ten spokes | five wide spokes |
+
+```
+blender -b -P blender/make_cars.py -- city/assets [--only hatch,sedan,suv] [--renders DIR] [--quick]
+```
+
+- **The body** is a subdivision surface over a control cage: rings of points at stations along the car, from the
+  middle of the underside up the side to the middle of the roof. The cage's rows are the body's lines (the sill, a
+  character line, the shoulder, the windows' seals, the roof rail), as sharp creases. Each face knows its zone (hood,
+  windscreen, window, pillar...), so glass, paint and black trim follow the window outlines exactly.
+- **The wheel arches** are cut out with cylinders sized to the tyre, with a gap of 4.7–5.5 cm, and the wells are
+  deep enough for the tyre at full lock. Around the cuts the panels keep the smooth body's normals.
+- **The details** are drawn onto the body's surface by projection, just above it:
+  - headlamps (a dark lens, a light strip, a projector, an amber indicator) and wrap-around tail lamps (tail,
+    brake, indicator, reverse);
+  - grilles, fog lamps, the bumpers' black parts, recesses for the number plates;
+  - the panel gaps, the handles, the mirrors with their indicators, the wipers;
+  - a spoiler, roof rails and arch trims for the crossover, and an antenna.
+- **The cabin:** an inner skin under the panels (a light headliner above the windows), the floor, the dashboard with
+  the instruments and a screen, the steering wheel and column, two seats, a console with a gear lever, the rear
+  bench, a parcel shelf and the mirror. It is fitted to the game's drivers:
+  - the script poses the player and the eight people in their Drive animation, as the game seats them;
+  - the seat's height is where the longest legs' heels rest on the floor;
+  - the steering wheel (41 cm, leaning back 15°) is placed nearest to all their hands.
+- **The driver's door** (on the left, as in Israel) is cut out of the body along its lines: around the front arch,
+  along the sill and the B-pillar, and above the window's foot with the glass and its frame. Its gap is 4.4 mm all
+  round. It has an inside panel with an armrest and a handle, and seals on its edges. It carries its mirror and
+  handle, and turns 65° on a hinge at its front edge. The opening has jambs with a seal lip.
+- **Two levels of detail:**
+  - **The near model:** about 45–55 thousand triangles with the cabin, plus 4.6 thousand per wheel.
+  - **The far model:** the cage subdivided once, lighter details and wheels, and a simple cabin. About 11–13
+    thousand triangles, and its wheels are part of it.
+- **Materials for the game:**
+  - `Paint`: each car's colour.
+  - `Glass`.
+  - `Trim`: everything else, from an 8×8 atlas of colour, roughness and metalness.
+  - `Lamps`: one texel per lamp function, which the game lights per car.
+  - `Plate`: where the game puts the number plates.
+
+The script checks every car, and `city/assets/cars_report.json` holds the results (it fails a car on any problem):
+
+- **Dimensions:** length, width, height, overhangs, wheelbase, track and clearance, against the table, within 1 cm.
+- **Wheels:**
+  - each tyre at least 1.5 cm from the body at every steering angle up to full lock (0.58 rad), with the body
+    rolled and pitched to the game's limits;
+  - no tyre sticking out of the body.
+- **The mesh:**
+  - no degenerate faces;
+  - no rays from inside the cabin escaping (with the door's gap counted as sealed).
+- **The door:**
+  - its gap is 3–6 mm;
+  - it swings to 65° without touching the body, its details or the cabin.
+- **The drivers:** for the player and each of the eight people at the wheel:
+  - at least 3 cm of head room;
+  - nothing of them inside the dashboard, the door, the headliner or the steering wheel;
+  - both hands within 6 cm of the rim.
+- **The lamps:** every function is there, on its side and at its end (the left indicator on the left, in front,
+  behind and on the mirror).
+
+**In the game** (`city/index.html`):
+- **Detail:** cars use the near model within 35 m (25 m on phones).
+- **Lamps:** running lights, faint tail lights, brake lights, reverse lights, and indicators blinking at 1.5 Hz.
+- **Indicators:**
+  - Traffic picks its next turn when it enters a street and signals for the last 30 m before the turn and through it.
+  - The player's car signals by itself in a sharp, slow turn.
+- **The door:** opens and shuts when someone gets in or out.
+- **Seating:** the seat comes from the model.
+- **Body movement:** the body's lean is held within the limits the wheel arches were checked for.
 
 ## Dressed character (`characters/`)
 
