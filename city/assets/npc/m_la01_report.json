@@ -66,8 +66,8 @@
   "ArmsDownRun": 46.5
  },
  "auto_mask": {
-  "poses": 118,
-  "skin_points": 1
+  "poses": 156,
+  "skin_points": 2
  },
  "checks": {
   "Rest": {},
@@ -81,6 +81,9 @@
    }
   },
   "Lie": {},
+  "Punch": {},
+  "Kick": {},
+  "Hit": {},
   "Walk/Run blends": {}
  },
  "springs": {
@@ -141,31 +144,34 @@
   "Walk": {},
   "Run": {},
   "Drive": {},
-  "Lie": {}
+  "Lie": {},
+  "Punch": {},
+  "Kick": {},
+  "Hit": {}
  },
  "triangles": {
   "LOD0_Shirt": 4979,
   "LOD0_Cloth": 12454,
-  "LOD0_Body": 12705,
+  "LOD0_Body": 12703,
   "LOD0_Hair": 3016,
   "LOD1_Cloth": 5711,
   "LOD1_Body": 2699,
   "LOD1_Hair": 338
  },
  "triangles_total": {
-  "LOD0": 33154,
+  "LOD0": 33152,
   "LOD1": 8748
  },
  "draw_calls": {
   "LOD0": 5,
   "LOD1": 3
  },
- "bytes_blender": 2209220,
+ "bytes_blender": 2364800,
  "compacted": {
   "TEXCOORD": 6,
   "WEIGHTS": 8
  },
- "bytes": 1818816,
+ "bytes": 1974424,
  "npc": {
   "id": "m_la01",
   "sex": "male",

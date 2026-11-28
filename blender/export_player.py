@@ -185,6 +185,7 @@ else:
         return d
     XS = XH = XP = XC = FL = AZ = K_LEG = 1.0
     TY = YO = DY_ANK = DARM = 0.0
+    BM = REF_BODY                     # (the player is the reference body)
 
 # ------------------------------------------------------------------ game-weight copy
 # the mouth is closed: teeth and tongue can never be seen
@@ -803,6 +804,72 @@ def pose_jump(t):
         cloth('cloth_sleeve_' + s, X, 5)
 
 
+# ---- fighting: a stance, a guard, a right straight, a front kick, taking a hit (each 0.4-0.7 s, from and back
+# to the guard, so the game can chain them)
+def lerp(a, b, t):
+    return a + (b - a) * t
+
+
+def stance(k=1.0):
+    """Knees a little bent, the left foot forward and the right one back, turned a little (k: how far into it)."""
+    move('pelvis', (0, 0, -0.035 * k * K_LEG))
+    rot('pelvis', Zax, 10 * k)
+    for s, f in (('L', 0.12), ('R', -0.09)):
+        leg(s, Vector((SX[s] * 0.13 * XH, 0.03 + DY_ANK - f * k * K_LEG, ANK0[s].z)), 0.0)
+
+
+def guard_arm(s, k=1.0):
+    """The fist up by the chin, the elbow in front of the ribs."""
+    arm_pose(s, lerp(IDLE_DOWN, IDLE_DOWN - 6, k) + DARM, 55 * k, 100 * k)
+    curl_fingers(s, 85 * k, 95 * k, 8.0, 50 * k)
+
+
+def pose_punch(t):
+    """A right straight (0.5 s): the hips and shoulders turn into it as the arm shoots out (at 0.15 s) and back."""
+    e = ss(t / 0.3) if t < 0.3 else (1.0 if t < 0.42 else 1 - ss((t - 0.42) / 0.5))
+    stance()
+    rot('spine02', Zax, -12 * e); rot('spine03', Zax, -10 * e); rot('neck', Zax, 14 * e)
+    rot('clavicle_R', Zax, -10 * e)
+    guard_arm('L')
+    arm_pose('R', lerp(IDLE_DOWN - 6, IDLE_DOWN - 4, e) + DARM, lerp(55, 86, e), lerp(100, 6, e))
+    curl_fingers('R', 85, 95, 8.0, 50)
+    hem_over_thighs()
+
+
+def pose_kick(t):
+    """A right front kick (0.7 s): the knee comes up, the leg snaps out low (0.3 s) and back down."""
+    up = ss(t / 0.3) if t < 0.3 else (1.0 if t < 0.55 else 1 - ss((t - 0.55) / 0.45))
+    ext = ss((t - 0.18) / 0.17) if t < 0.35 else (1.0 if t < 0.43 else 1 - ss((t - 0.43) / 0.17))
+    stance(1 - up)
+    rot('pelvis', X, 9 * up)                                  # leaning back as the leg comes up
+    rot('spine02', X, -4 * up)
+    leg('L', Vector((SX['L'] * 0.13 * XH, 0.03 + DY_ANK - 0.05 * up * K_LEG, ANK0['L'].z)), 0.0)
+    H = PB['thigh_R'].head.copy(); Ln = L1['R'] + L2['R']
+    rest = Vector((SX['R'] * 0.13 * XH, 0.03 + DY_ANK + 0.09 * (1 - up) * K_LEG, ANK0['R'].z))
+    # (a low kick, at the knees: the thigh comes up to about 45 degrees. Higher, the jeans' waist bunches up
+    # through the shirt's front at the hip's crease, as at the wheel)
+    chamber = H + Vector((0, -0.20 * Ln, -0.88 * Ln))          # the knee comes up, the foot under it
+    out = H + Vector((0, -0.55 * Ln, -0.81 * Ln))              # the leg out in front, the foot at the knees' height
+    a = rest.lerp(chamber, up).lerp(out, ext)
+    leg('R', a, lerp(0.0, -25.0, ext))
+    for s_ in 'LR':
+        guard_arm(s_)
+    hem_over_thighs()
+    cloth('cloth_shirt_F', X, -14 * up); cloth('cloth_shirt_R', X, -18 * up)   # the hem lifted clear of the jeans' bunching
+
+
+def pose_hit(t):
+    """Hit (0.4 s): the head and the chest snap back, a half step back, the guard kept up."""
+    h = math.sin(math.pi * min(1.0, t / 0.75)) if t < 0.75 else 0.0
+    stance()
+    move('pelvis', (0, 0.05 * h * K_LEG, 0.0))
+    rot('spine02', X, 4 * h); rot('spine03', X, 3 * h); rot('neck', X, 6 * h); rot('head', X, 12 * h)
+    rot('head', Zax, 10 * h)
+    for s in 'LR':
+        guard_arm(s)                       # (the guard kept: lowered, a heavy body's arms press into the shirt's sides)
+    hem_over_thighs()
+
+
 LIE = dict(spine=-4.0, neck=-6.0, swing=-6.0, legs=0.0, drop=0.0)
 
 
@@ -877,18 +944,19 @@ def lie_solve():
         m.show_viewport = False
 
 
+# (the fighting moves play once; they start and end in the guard, so they are baked and checked as loops are)
+FIGHT = [('Punch', pose_punch, 15, 'once'), ('Kick', pose_kick, 21, 'once'), ('Hit', pose_hit, 12, 'once')]
 if NPC:
     ANIMS = [('Idle', pose_idle, 120, True), ('Walk', lambda t: gait(t, WALK), round(WALK['cycle'] * FPS), True),
              ('Run', lambda t: gait(t, RUN), round(RUN['cycle'] * FPS), True),
-             ('Drive', pose_drive, 2, False), ('Lie', pose_lie, 2, False)]
+             ('Drive', pose_drive, 2, False), ('Lie', pose_lie, 2, False)] + FIGHT
 else:
     ANIMS = [('Idle', pose_idle, 120, True), ('Walk', lambda t: gait(t, WALK), round(WALK['cycle'] * FPS), True),
              ('Run', lambda t: gait(t, RUN), round(RUN['cycle'] * FPS), True),
-             ('Drive', pose_drive, 2, False), ('Jump', pose_jump, 2, False)]
+             ('Drive', pose_drive, 2, False), ('Jump', pose_jump, 2, False), ('Lie', pose_lie, 2, False)] + FIGHT
 N_WALK, N_RUN = round(WALK['cycle'] * FPS), round(RUN['cycle'] * FPS)
 FOOTWEAR = ('Shoe_', 'ShoeCollar_', 'Laces_', 'Sole_', 'Eyelets_', 'Socks_')
-if NPC:
-    lie_solve()
+lie_solve()
 arm.animation_data_create()
 ACTIONS = {}
 for name, fn, n, loop in ANIMS:
@@ -1399,7 +1467,7 @@ def check_setup_points():
 
 
 def auto_mask():
-    """(The city's people.) Skin that is under the clothes or the hair at rest and
+    """Skin that is under the clothes or the hair at rest and
     comes out through them, or within 0.5 mm of it, in a frame of an animation
     or of a Walk/Run blend (the armpits of a heavy body as the arms come down,
     a point of the chest breathing) is hidden by the mask, as game_mask hides
@@ -1443,8 +1511,7 @@ def auto_mask():
     log('auto mask: %d skin points under the cloth that come out of it (in %d poses) hidden' % (len(hide), poses))
 
 
-if NPC:
-    auto_mask()
+auto_mask()                          # (the player too: a guard or a kick bends the arms and the hips further than walking)
 skin_check_setup()
 summary = {}
 for name, fn, n, loop in [('Rest', None, 1, False)] + ANIMS:

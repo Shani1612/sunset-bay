@@ -8,17 +8,21 @@ Play: open `index.html`, or the GitHub Pages link of this repository.
 
 A second game built entirely from Blender models, in Hebrew. Open `city/` on the GitHub Pages link. It's a Mediterranean
 city by the sea on a sunny day:
-- **The city:** white Bauhaus buildings (long balconies with rounded ends, ribbon windows, shutters, AC units, solar
-  water heaters, shops with Hebrew signs), white classic buildings, and a district of glass towers, with more towers on
-  the skyline.
+- **The city:** 6 × 5 blocks (about 730 × 390 m) of white Bauhaus buildings (long balconies with rounded ends, ribbon
+  windows, shutters, AC units, solar water heaters, shops with Hebrew signs) and white classic buildings, and a
+  district of glass towers (four blocks), with more towers on the skyline.
 - **The seafront:** a promenade with palms and benches, a beach with umbrellas, and the sea.
-- **The streets:** palms and trees, lamps, crosswalks and traffic lights.
-- **Cars and people:** a hatchback, a sedan and a crossover with Israeli number plates, and people. Traffic stops at
-  red lights and signals before it turns, pedestrians cross with the lights, and you can walk, take any car, and do
-  delivery and taxi jobs (paid in shekels).
+- **The streets:** palms and trees, lamps, crosswalks and traffic lights, and things on the sidewalks: bins, hydrants,
+  benches, café tables and chairs, planters, rental scooters, mail and newspaper boxes, street signs, dumpsters, and
+  road works with barriers and cones. They break, fly or fall over when a car hits them (see below).
+- **Cars and people:** a hatchback, a sedan and a crossover with Israeli number plates, and people: 64 cars in traffic,
+  90 parked and 120 people on foot (24, 36 and 40 on phones). Traffic stops at red lights and signals before it turns,
+  pedestrians cross with the lights, and you can walk, take any car, fight, and do delivery and taxi jobs (paid in
+  shekels).
 
 The assets come from `blender/export_city_assets.py` (`city/assets/city.glb` and the textures in `city/assets/tex/`),
-`blender/export_game_assets.py` (`city/assets/actors.glb`) and `blender/make_cars.py` (`city/assets/cars.glb`). Like the cars and people in the first game, they load
+`blender/export_game_assets.py` (`city/assets/actors.glb`), `blender/make_cars.py` (`city/assets/cars.glb`) and
+`blender/make_props.py` (`city/assets/props.glb`). Like the cars and people in the first game, they load
 from a web server: to play locally, run `python3 -m http.server` in the repository and open `http://localhost:8000/city/`.
 
 On desktop the cars and people are detailed models made in Blender (`assets/sunset_bay.glb`, built by
@@ -74,7 +78,9 @@ blender -b -P blender/make_cars.py -- city/assets [--only hatch,sedan,suv] [--re
 - **Materials for the game:**
   - `Paint`: each car's colour.
   - `Glass`.
-  - `Trim`: everything else, from an 8×8 atlas of colour, roughness and metalness.
+  - `Trim`: everything else, from an 8×8 atlas of colour, roughness and metalness. (The atlases' colour space is set
+    before their pixels are written: setting it afterwards turns a generated image black in Blender, which until
+    now left the trim, the cabin and the lamps' lenses black and glossy in the game.)
   - `Lamps`: one texel per lamp function, which the game lights per car.
   - `Plate`: where the game puts the number plates.
 
@@ -103,7 +109,9 @@ The script checks every car, and `city/assets/cars_report.json` holds the result
   behind and on the mirror).
 
 **In the game** (`city/index.html`):
-- **Detail:** cars use the near model within 35 m (25 m on phones).
+- **Detail:** cars use the near model within 35 m (25 m on phones; less at lower quality, see *Frame rate*). Further
+  away, every car of a model is one instance of its far model, with its paint as the instance's colour (one draw call
+  per part for all of them), and only those in view or in the sun's shadow box are drawn. None beyond 330 m.
 - **Lamps:** running lights, faint tail lights, brake lights, reverse lights, and indicators blinking at 1.5 Hz.
 - **Indicators:**
   - Traffic picks its next turn when it enters a street and signals for the last 30 m before the turn and through it.
@@ -145,6 +153,126 @@ give its mass (1,200, 1,400 and 1,650 kg), its centre of gravity, power and torq
   - A parked car that is hit slides on its locked wheels.
 - **Feedback:** the tyres leave marks on the road and squeal when they slide, and the engine's sound follows its
   revolutions. The speedometer shows the gear.
+
+## Things on the street, and what happens to them (`city/assets/props.glb`)
+
+`blender/make_props.py` builds ten street things from code, all on one small atlas material (a colour, roughness
+and metalness per part), each standing on the ground at its origin:
+
+```
+blender -b -P blender/make_props.py -- city/assets/props.glb [--renders DIR]
+```
+
+| Thing | Mass | | Thing | Mass |
+|---|---|---|---|---|
+| Traffic cone | 3 kg | | Newspaper box | 30 kg |
+| Café table, chair | 14, 4 kg | | Mailbox (on a post) | 22 kg |
+| Planter (concrete, with shrubs) | 160 kg | | Dumpster (on castors) | 240 kg |
+| Rental scooter | 16 kg | | Road-works barrier | 9 kg |
+| Street sign (two blades) | 12 kg | | | |
+
+Each one's extras carry its size, mass and how it goes when hit: it flies, or (a pole) it tips over.
+
+**Where they stand** (`city/index.html`, placed with the city):
+- café tables with a chair either side by some shop fronts, beyond the people's path;
+- mail and newspaper boxes on the line of the lamps;
+- scooters end to end by the crossings, and planters along the curb;
+- dumpsters in the parking lane of the side streets;
+- road works on a few streets, with barriers in the parking lane and cones along the lane;
+- a street sign at a corner of each crossing;
+- more bins (four along each block's side).
+
+**What happens to them** (the city's lamps, hydrants, bins and benches too):
+- **Taking one off its spot:** each thing stands as an instance of an instanced mesh, with a circle that cars hit.
+  It takes a hit of some speed: 0.4 m/s for a cone, 6 m/s for a lamp, 7 m/s (25 km/h) for a planter. A slower car
+  stops against it. A faster one takes it off its spot and loses the momentum it gives it, so a dumpster slows a car
+  far more than a cone.
+- **Flying:** a thing off its spot is a body of its own, with its mass and turning inertia. Its eight corners land
+  on the ground with a little bounce and friction, so it tumbles and slides, and buildings and posts stop it. It
+  rests once still for half a second. A car can hit it again; flying fast, it knocks people over.
+- **Tipping:** a lamp, a sign or a mailbox falls about its foot, towards the push, and lies on the ground.
+- **Hydrants:** a hydrant breaks off and sprays a fountain of water for 24 s.
+- **Kicks and punches** take light things off their spots too (a kick gives them up to 7 m/s, a punch 4.5 m/s), and
+  push the ones lying about.
+- **Back on their spots:** when the camera is 140 m from a thing and from its spot. At most 48 are off their spots at
+  once.
+
+**Measured in the game** (`cg_props.js`):
+
+| Hit | Car's speed | Speed lost | What happened |
+|---|---|---|---|
+| Lamp | 60 km/h | 11% | it tips over and lies on the ground after 3 s |
+| Hydrant | 40 km/h | 9% | off its foot, with the fountain |
+| Bin, newspaper box | 30 km/h | 2–4% | they fly |
+| A row of 7 cones | 40 km/h | 19% | all 7 fly |
+| A kicked bin | | | it flies at 7 m/s |
+| Dumpster | 30 km/h | 18% | it slides 8.7 m |
+| Planter | 20 km/h | 83% | it stands: the car stops |
+| Planter | 41 km/h | 14% | it goes |
+
+## Fighting
+
+On foot, **Q** or the left mouse button punches and **R** or the right button kicks (on phones: 👊 and 🦶). With the
+pointer not locked, a click that doesn't drag punches.
+
+- **The blows:** a punch lands 0.15 s into it (reach 1.15 m), a kick at 0.3 s (1.45 m), on whoever is nearest in
+  front.
+- **The people:**
+  - A person takes 3 hit points: a punch takes one, a kick two.
+  - Hit, they flinch and step back, then run off. On their last point they go down for 4–6 s, then get up and run.
+  - Everyone within 15 m runs away from the player.
+  - About a third of them are tough: hit, they fight back. They come at the player, punch and kick about once a
+    second, and their blows land only if the player is still in reach and in front, so he can step away. They give
+    up after 25 s, or when the player is down, drives off or is 30 m away. A tough one knocked down gets up and comes
+    back.
+- **The player:**
+  - 100 health; a punch takes 9 and a kick 15.
+  - It comes back at 5 a second after 5 s without a blow.
+  - The bar shows while it isn't full.
+  - At nothing he goes down for 4.5 s, the fight ends, and he gets up with full health and a ₪100 hospital bill.
+- **Taking a traffic car:** its driver is thrown out of it, onto the ground, and gets up after 3–4 s. If they are
+  tough and the player is on foot nearby, they come back to fight.
+
+Measured (`cg_fight.js`):
+- A punch takes a person from 3 to 2, and they run.
+- A kick and a punch put them down; they get up 4.3 s later, and run.
+- A tough one fought back and put the player down after 13.6 s. He got up with full health, ₪100 less.
+- The driver of a taken car lay 2 m from it.
+
+## Frame rate
+
+The game aims for the screen's own rate: 120 frames a second (or 144, 165) on such a screen on a computer, 60 on a
+phone. It measures the screen's refresh while the city loads.
+
+- **Counter:** at the top, with the quality level and the draw calls. **G** shows or hides it.
+- **Quality levels:** five, from the top one down:
+
+  | Level | Pixel ratio | Shadow map | Shadows drawn | Full-detail buildings | Full-detail trees | People shown | Full-detail cars |
+  |---|---|---|---|---|---|---|---|
+  | 5 | 1.5 | 2048 | every frame | 115 m | 110 m | 130 m | 35 m |
+  | 4 | 1.25 | 2048 | every frame | 100 m | 95 m | 115 m | 32 m |
+  | 3 | 1.0 | 1536 | every frame | 90 m | 85 m | 105 m | 28 m |
+  | 2 | 0.9 | 1024 | every 2nd frame | 80 m | 75 m | 90 m | 25 m |
+  | 1 | 0.8 | 1024 | every 2nd frame | 70 m | 70 m | 80 m | 22 m |
+
+  Computers start at level 5, phones at level 3.
+- **Going down:** a level, when frames come 15% later than the screen's rate for a second.
+- **Going up:** a level, when frames are on time with half the frame's time to spare for 4 s.
+  - A level that is raised and soon dropped again is not tried for 30 s.
+  - In the test (`cg_quality.js`), frames at under half the screen's rate brought it from 5 to 1 in 5 s, and frames
+    on time brought it back to 5.
+- **Less to draw:**
+  - **Far cars:** instanced (see the cars, above).
+  - **Far buildings:** the city's chunks in regions of about 2 × 2 blocks. A region far away is drawn merged, one
+    draw call per material.
+  - **Signs and awnings:** their colours are per vertex, so each chunk draws all of them in one call each, where
+    before each colour had its own.
+  - **Street things, lamps, palms and trees:** they are instanced. Each frame only the ones within their distance and
+    in view, or in the sun's shadow box, are drawn.
+
+  In the street, at the top level: 347 draw calls and 1.4 million triangles (shadows included) for the city three
+  times the size of before, against 235 and 0.55 million then. A frame's work in JavaScript at 120 Hz is 0.6–0.8 ms
+  (`cg_perf.js`).
 
 ## Dressed character (`characters/`)
 
@@ -191,7 +319,7 @@ The dressed character is the player in `city/`. `blender/export_player.py` makes
 the game version: the shoes are lighter, the hidden teeth are removed, the
 textures are 1024 px, and the cloth is single-layer and double-sided.
 
-It adds five animations on the skeleton:
+It adds nine animations on the skeleton:
 
 - **Idle:** breathing and a slight weight shift, with the arms hanging straight
   beside the body.
@@ -201,6 +329,10 @@ It adds five animations on the skeleton:
   90°, the hands in loose fists, and the arms swing from the shoulder.
 - **Drive:** sitting, with hands on the wheel.
 - **Jump.**
+- **Lie:** knocked down (as the city's people, below).
+- **Punch** (0.5 s), **Kick** (0.7 s) and **Hit** (0.4 s, a blow taken: the head and chest snap back): from a guard
+  (fists by the chin) and back to it. The kick is low, at the knees: higher, the jeans' waist bunches up through the
+  shirt's front, as at the wheel. Every frame passes the cloth checks.
 
 With the arms down, the inner arm rests against the shirt's side. Two shape keys
 on the shirt press the cloth under the arms in, just enough to clear the arm and
@@ -248,6 +380,7 @@ How the game plays it:
   or the run button.
 - It scales the cycles to the speed, so the feet don't slide.
 - It switches to Drive in a car and to Jump in the air.
+- The fight moves, a hit and lying down play once, timed by the game.
 - It sets `ArmsDown` to the weight of Idle and Walk, and `ArmsDownRun` to the
   weight of Run.
 - If `player.glb` can't load, the game uses its simple figure.
@@ -309,8 +442,9 @@ python3 blender/npc_manifest.py city/assets/npc
    - **Gait:** the stride scales with the leg length, and the cycle time with its
      square root.
    - **Arms:** they hang as far outside the hips as the player's do.
-   - **Animations:** Idle, Walk, Run, Drive and Lie (knocked down: on the back,
-     the head, back, seat, arms and heels solved down onto the ground).
+   - **Animations:** Idle, Walk, Run, Drive, Lie (knocked down: on the back,
+     the head, back, seat, arms and heels solved down onto the ground), and the
+     player's Punch, Kick and Hit.
 5. **Checks:** every frame of every animation and the Walk/Run blends are
    checked as for the player, with the hair as a piece of cloth:
    - no scalp through it, no skin into it, none of it through the shirt;
@@ -344,6 +478,8 @@ place.
   to it, with the `ArmsDown` shapes.
 - **Drivers** sit with Drive. A pedestrian hit by a car lies down (Lie), then
   gets up and runs away.
+- **Fighting:** someone fighting stands in the guard (the punch's first frame),
+  punches and kicks, and flinches (Hit) when hit.
 
 MB-Lab's code is GPL3 and its data (the base meshes and textures the bodies
 come from) is AGPL3, as for `characters/Human.glb`.

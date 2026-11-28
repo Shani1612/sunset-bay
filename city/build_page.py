@@ -9,7 +9,7 @@ decoder from a CDN either, so publish models without Draco compression:
 
     npx @gltf-transform/cli copy city/assets/city.glb out/assets/city.glb
     base64 -w0 out/assets/city.glb > out/assets/city.glb.txt
-(the same for actors.glb, cars.glb and player.glb, and for city/assets/npc/<id>.glb as
+(the same for actors.glb, cars.glb, props.glb and player.glb, and for city/assets/npc/<id>.glb as
 assets/npc/<id>.glb.txt), plus city/assets/tex/*.jpg. The city's people load after the
 city, outside the loading bar, and their list (city/assets/npc/npcs.json) is put
 into the page.
@@ -42,7 +42,7 @@ function loadB64(url,onLoad,onProgress,onError){
   }).catch(bad);
 }"""
 s = s.replace(anchor, loader, 1)
-for m in ('city', 'actors', 'cars', 'player'):
+for m in ('city', 'actors', 'cars', 'props', 'player'):
     a = "gltfL.load('assets/%s.glb'," % m
     assert s.count(a) == 1, a
     s = s.replace(a, "loadB64('assets/%s.glb'," % m)

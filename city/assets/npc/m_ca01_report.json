@@ -66,7 +66,7 @@
   "ArmsDownRun": 38.4
  },
  "auto_mask": {
-  "poses": 120,
+  "poses": 158,
   "skin_points": 0
  },
  "checks": {
@@ -81,6 +81,9 @@
    }
   },
   "Lie": {},
+  "Punch": {},
+  "Kick": {},
+  "Hit": {},
   "Walk/Run blends": {}
  },
  "springs": {
@@ -141,7 +144,10 @@
   "Walk": {},
   "Run": {},
   "Drive": {},
-  "Lie": {}
+  "Lie": {},
+  "Punch": {},
+  "Kick": {},
+  "Hit": {}
  },
  "triangles": {
   "LOD0_Shirt": 4979,
@@ -160,12 +166,12 @@
   "LOD0": 5,
   "LOD1": 3
  },
- "bytes_blender": 2212736,
+ "bytes_blender": 2369788,
  "compacted": {
   "TEXCOORD": 6,
   "WEIGHTS": 8
  },
- "bytes": 1821804,
+ "bytes": 1978852,
  "npc": {
   "id": "m_ca01",
   "sex": "male",

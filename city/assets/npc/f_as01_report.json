@@ -66,8 +66,8 @@
   "ArmsDownRun": 26.2
  },
  "auto_mask": {
-  "poses": 118,
-  "skin_points": 2
+  "poses": 156,
+  "skin_points": 3
  },
  "checks": {
   "Rest": {},
@@ -76,6 +76,9 @@
   "Run": {},
   "Drive": {},
   "Lie": {},
+  "Punch": {},
+  "Kick": {},
+  "Hit": {},
   "Walk/Run blends": {}
  },
  "springs": {
@@ -136,31 +139,34 @@
   "Walk": {},
   "Run": {},
   "Drive": {},
-  "Lie": {}
+  "Lie": {},
+  "Punch": {},
+  "Kick": {},
+  "Hit": {}
  },
  "triangles": {
   "LOD0_Shirt": 4979,
   "LOD0_Cloth": 12548,
-  "LOD0_Body": 12854,
+  "LOD0_Body": 12852,
   "LOD0_Hair": 3192,
   "LOD1_Cloth": 5790,
   "LOD1_Body": 2700,
   "LOD1_Hair": 524
  },
  "triangles_total": {
-  "LOD0": 33573,
+  "LOD0": 33571,
   "LOD1": 9014
  },
  "draw_calls": {
   "LOD0": 5,
   "LOD1": 3
  },
- "bytes_blender": 2238112,
+ "bytes_blender": 2388200,
  "compacted": {
   "TEXCOORD": 6,
   "WEIGHTS": 8
  },
- "bytes": 1841572,
+ "bytes": 1991676,
  "npc": {
   "id": "f_as01",
   "sex": "female",
