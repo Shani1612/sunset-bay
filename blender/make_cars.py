@@ -1910,9 +1910,9 @@ def game_materials():
         for i, n in enumerate(cells):                       # (rows from the bottom, as Blender's texture coordinates)
             r, c = i // 8, i % 8
             px[r * ch:(r + 1) * ch, c * cw:(c + 1) * cw, :] = value(n)
+        im.colorspace_settings.name = colorspace            # (first: changing it later regenerates the image, black)
         im.pixels = px.ravel().tolist()
-        im.colorspace_settings.name = colorspace
-        im.pack()
+        im.update(); im.pack()
         return im
 
     def hexv(h):
